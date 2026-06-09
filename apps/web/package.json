@@ -17,11 +17,14 @@
     "@vouchfx/db": "workspace:*",
     "lucide-react": "^0.469.0",
     "next": "^15.1.3",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "telegram": "^2.26.22"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",

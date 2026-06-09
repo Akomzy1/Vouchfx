@@ -3,6 +3,7 @@ import Redis from "ioredis";
 import { parseEnv } from "@vouchfx/config";
 import { type SignalJobData } from "@vouchfx/core";
 import { createReadonlyClient, startListening } from "./listener";
+import { loadSessionFromDb, updateSessionStatus } from "./session-manager";
 
 const env = parseEnv();
 
@@ -14,41 +15,69 @@ const QUEUE_NAME                 = "vouchfx:signals";
 
 console.log(`[listener] starting — NODE_ENV=${env.NODE_ENV}`);
 
-// ── Guard: require spike config ───────────────────────────────────────────────
-if (!env.TELEGRAM_API_ID || !env.TELEGRAM_API_HASH || !env.TELEGRAM_SESSION_STRING) {
-  console.error(
-    "[listener] fatal: TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_SESSION_STRING are required.\n" +
-      "  Generate a session string: pnpm --filter @vouchfx/listener exec tsx src/auth.ts"
-  );
+if (!env.TELEGRAM_API_ID || !env.TELEGRAM_API_HASH) {
+  console.error("[listener] fatal: TELEGRAM_API_ID and TELEGRAM_API_HASH are required");
   process.exit(1);
 }
-
-if (!env.TELEGRAM_SPIKE_CHAT_ID) {
-  console.error(
-    "[listener] fatal: TELEGRAM_SPIKE_CHAT_ID is required for the Phase-0 spike.\n" +
-      '  Set it to the channel chat id, e.g. TELEGRAM_SPIKE_CHAT_ID="-1001234567890"'
-  );
-  process.exit(1);
-}
-
-const spikeChatId = BigInt(env.TELEGRAM_SPIKE_CHAT_ID);
 
 // ── Redis + BullMQ queue ──────────────────────────────────────────────────────
-// maxRetriesPerRequest: null is required by BullMQ for blocking commands
 const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const queue = new Queue<SignalJobData, void, string>(QUEUE_NAME, { connection: redis });
-
 redis.on("error", (err) => console.error("[listener] redis error:", err));
 
-const client = createReadonlyClient(
-  env.TELEGRAM_API_ID,
-  env.TELEGRAM_API_HASH,
-  env.TELEGRAM_SESSION_STRING
-);
-
 (async () => {
+  // ── Resolve session string ─────────────────────────────────────────────────
+  // P1.3+: load from DB (encrypted at rest, decrypted here in worker memory).
+  // P0 fallback: use TELEGRAM_SESSION_STRING env var for the spike.
+  let sessionString: string;
+  let userId = SPIKE_USER_ID;
+
+  const useDbSession =
+    env.SUPABASE_URL &&
+    env.SUPABASE_SERVICE_ROLE_KEY &&
+    env.ENCRYPTION_KEY &&
+    !env.TELEGRAM_SESSION_STRING; // env var overrides DB for backward-compat spike
+
+  if (useDbSession) {
+    console.log("[listener] loading session from database");
+    try {
+      // P1.4 will expand this to all users; for now, load one user for testing.
+      // Set SPIKE_USER_ID to the actual user UUID, or extend via env var.
+      const LISTENER_USER_ID = process.env.LISTENER_USER_ID ?? SPIKE_USER_ID;
+      const loaded = await loadSessionFromDb(LISTENER_USER_ID);
+      sessionString = loaded.sessionString;
+      userId = loaded.userId;
+      console.log(`[listener] session loaded for user ${userId} (decrypted in memory, not logged)`);
+    } catch (err) {
+      console.error("[listener] failed to load session from DB:", (err as Error).message);
+      process.exit(1);
+    }
+  } else if (env.TELEGRAM_SESSION_STRING) {
+    console.log("[listener] using spike session from env var (P0 mode)");
+    sessionString = env.TELEGRAM_SESSION_STRING;
+  } else {
+    console.error(
+      "[listener] fatal: provide either:\n" +
+      "  - TELEGRAM_SESSION_STRING (P0 spike), or\n" +
+      "  - SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + ENCRYPTION_KEY (P1 DB sessions)"
+    );
+    process.exit(1);
+  }
+
+  if (!env.TELEGRAM_SPIKE_CHAT_ID) {
+    console.error("[listener] fatal: TELEGRAM_SPIKE_CHAT_ID is required");
+    process.exit(1);
+  }
+
+  const spikeChatId = BigInt(env.TELEGRAM_SPIKE_CHAT_ID);
+
+  const client = createReadonlyClient(
+    env.TELEGRAM_API_ID!,
+    env.TELEGRAM_API_HASH!,
+    sessionString
+  );
+
   await startListening(client, spikeChatId, async (idempotencyKey, text, hasMedia) => {
-    // Parse the component parts from the key: "<chatId>:<messageId>:<editVersion>"
     const parts = idempotencyKey.split(":");
     const chatId = parts[0]!;
     const messageId = parseInt(parts[1]!, 10);
@@ -62,11 +91,10 @@ const client = createReadonlyClient(
       text,
       hasMedia,
       sourceId: SPIKE_SOURCE_ID,
-      userId: SPIKE_USER_ID,
+      userId,
       brokerConnectionId: SPIKE_BROKER_CONNECTION_ID,
     };
 
-    // jobId = idempotencyKey: BullMQ ignores duplicate job ids — first delivery wins
     await queue.add("signal", jobData, {
       jobId: idempotencyKey,
       attempts: 3,
@@ -76,10 +104,18 @@ const client = createReadonlyClient(
     console.log(`[listener] enqueued job id=${idempotencyKey} msg=${messageId} edit=${editVersion}`);
   });
 
+  // Update last_connected_at when we successfully connect via DB session
+  if (useDbSession) {
+    await updateSessionStatus(userId, "active").catch(() => {/* non-fatal */});
+  }
+
   console.log("[listener] running — waiting for messages. Press Ctrl+C to stop.");
 
   async function shutdown(): Promise<void> {
     console.log("\n[listener] shutting down");
+    if (useDbSession) {
+      await updateSessionStatus(userId, "disconnected").catch(() => {/* non-fatal */});
+    }
     await client.disconnect();
     await queue.close();
     redis.disconnect();

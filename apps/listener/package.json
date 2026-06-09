@@ -10,6 +10,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.0",
     "@vouchfx/config": "workspace:*",
     "@vouchfx/core": "workspace:*",
     "bullmq": "^5.53.0",
