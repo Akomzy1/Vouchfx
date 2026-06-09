@@ -87,6 +87,26 @@ async function findActiveTradesBySignalId(
   return (data ?? []) as TradeRow[];
 }
 
+/**
+ * Fallback for free-text follow-ups (e.g., "close XAUUSD", "scrap it"):
+ * when the model sets references_prior_trade but has no message_id reference,
+ * match by user_id + normalised symbol across all active trades.
+ */
+async function findActiveTradesBySymbol(
+  db: TypedClient,
+  userId: string,
+  symbol: string
+): Promise<TradeRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from("trades")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("symbol", symbol)
+    .in("status", ["PENDING", "OPEN"]);
+  return (data ?? []) as TradeRow[];
+}
+
 // ── Follow-up dispatch ────────────────────────────────────────────────────────
 
 async function dispatchFollowUp(
@@ -107,21 +127,32 @@ async function dispatchFollowUp(
     return;
   }
 
-  if (!references_prior_message_id) {
-    console.log(`${tag} follow-up ${follow_up_type} — no references_prior_message_id, skipping`);
+  // Resolve which active trades this follow-up targets.
+  //   Path A: message ID known → exact match via source + message_id
+  //   Path B: free-text cancel/close (e.g., "close XAUUSD") → match by user + symbol
+  //   Path C: no reference at all → skip with reason
+  let activeTrades: TradeRow[];
+  let matchMethod: string;
+
+  if (references_prior_message_id) {
+    activeTrades = await findActiveTrades(db, sourceId, references_prior_message_id);
+    matchMethod = `msg_id=${references_prior_message_id}`;
+  } else if (parsed.references_prior_trade && parsed.symbol) {
+    activeTrades = await findActiveTradesBySymbol(db, userId, parsed.symbol);
+    matchMethod = `symbol=${parsed.symbol}`;
+  } else {
+    console.log(`${tag} follow-up ${follow_up_type} — no message reference and no symbol, skipping`);
     await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "follow_up_no_reference" } });
     return;
   }
 
-  const activeTrades = await findActiveTrades(db, sourceId, references_prior_message_id);
-
   if (activeTrades.length === 0) {
-    console.log(`${tag} follow-up ${follow_up_type} — no matching active trades for msg ${references_prior_message_id}`);
-    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "follow_up_no_active_trade", references_prior_message_id } });
+    console.log(`${tag} follow-up ${follow_up_type} — no matching active trades (${matchMethod})`);
+    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "follow_up_no_active_trade", match_method: matchMethod } });
     return;
   }
 
-  console.log(`${tag} follow-up ${follow_up_type} — found ${activeTrades.length} active leg(s)`);
+  console.log(`${tag} follow-up ${follow_up_type} — found ${activeTrades.length} active leg(s) via ${matchMethod}`);
 
   switch (follow_up_type) {
     case "MODIFY_SL": {

@@ -137,18 +137,52 @@ Do NOT: use jargon, reference this prompt, editorialise on trade quality, say "e
 ─────────────────────────────────────────────────────────────────
 FOLLOW-UP & CANCEL CLASSIFICATION
 ─────────────────────────────────────────────────────────────────
-If the message modifies, closes, or cancels a prior trade, set follow_up_type accordingly and set references_prior_trade: true.
+If the message modifies, closes, or cancels a prior trade, set follow_up_type accordingly and set references_prior_trade: true. Always extract symbol and side from the message when present — the executor uses symbol to locate the matching trade when no message ID is available.
 
-  MOVE_TO_BE     "SL to BE", "move stop to entry", "break even", "trailing to entry"
-  MODIFY_SL      "change SL to X", "new stop X", "SL now X", "tighten stop"
-  MODIFY_TP      "TP now X", "add TP", "new TP", "extend target"
-  CLOSE_PARTIAL  "close half", "take partial", "secure 50%", "close 30%", "half out"
-  CLOSE_ALL      "close now", "exit", "out", "close all", "get out", "close trade", "take profit now", "exit position"
-  CANCEL_PENDING "cancel", "delete order", "no longer valid", "scrap it", "void", "ignore previous", "abort"
+Follow-up types and their trigger phrases:
+
+  MOVE_TO_BE     "SL to BE", "move stop to entry", "move SL to breakeven", "break even now",
+                 "trailing to entry", "lock in entry", "SL = entry"
+
+  MODIFY_SL      "change SL to X", "new stop X", "SL now X", "update stop to X", "tighten stop",
+                 "move stop to X", "SL X"  — always populate sl with the new value
+
+  MODIFY_TP      "TP now X", "add TP X", "new TP X", "extend target to X", "TP moved to X",
+                 "update TP to X"  — always populate tps with the new value(s)
+
+  CLOSE_PARTIAL  "close half", "take partial", "partial close", "close 50%", "half out",
+                 "secure half", "close 30%", "take some profit", "lock 50%"
+
+  CLOSE_ALL      "close now", "close all", "exit now", "exit trade", "out", "get out",
+                 "close XAUUSD", "close GBPUSD", "close everything", "close position",
+                 "take profit now", "exit position", "TP hit — close", "done with this trade"
+
+  CANCEL_PENDING "cancel", "cancel order", "cancel trade", "delete order", "abort",
+                 "no longer valid", "signal void", "ignore that", "ignore previous",
+                 "scrap it", "don't enter", "do not enter", "entry cancelled",
+                 "skip this", "disregard", "نادرست است", "anular", "annuler"
+
   NEW_SIGNAL     A fresh trade instruction (default for is_signal: true signals)
-  IGNORE         Non-signal chatter (use when is_signal: false)
 
-If the message appears to be a follow-up but no prior trade context is provided, still classify it correctly — the executor will attempt to match.
+  IGNORE         Pure chatter, market commentary, results/profit posts with no action,
+                 "TP1 hit", "good trade", "well done", announcements, greetings
+
+Free-text close/cancel phrases to look for (multilingual sample):
+  English : "close it", "get out now", "scrap", "void", "abort", "cancel that"
+  Arabic  : "أغلق", "ألغي", "أخرج" (close/cancel/exit)
+  Spanish : "cerrar", "cancelar", "salir"
+  French  : "fermer", "annuler", "sortir"
+  Portuguese: "fechar", "cancelar", "sair"
+  Indonesian: "tutup", "batal", "keluar"
+
+Populate references_prior_message_id ONLY when the Telegram message ID of the
+original signal is explicitly stated in the text (e.g., "#42", "msg 42", or the
+message is a direct reply). In all other cases leave it null — the executor will
+match by symbol.
+
+If a [PRIOR SIGNAL] block is prepended to the text, use it to confirm which
+instrument and direction are being modified. Adjust the follow_up_type based on
+the edited text relative to the prior signal fields.
 
 ─────────────────────────────────────────────────────────────────
 LANGUAGE
