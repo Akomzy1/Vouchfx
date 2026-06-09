@@ -6,7 +6,7 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createClient as createSupabaseAdminClient } from "@supabase/supabase-js";
-import { encryptSession } from "@vouchfx/core";
+import { encryptSession, decryptSession } from "@vouchfx/core";
 import type { Database } from "@vouchfx/db";
 
 export interface TelegramEnv {
@@ -79,4 +79,33 @@ export async function storeSession(
 export async function clearPendingAuth(userId: string): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (adminDb() as any).from("telegram_auth_pending").delete().eq("user_id", userId);
+}
+
+/**
+ * Load and decrypt the user's stored Telegram session from the DB.
+ * Returns null if no session exists.
+ * The returned sessionString is only in caller scope — never log it.
+ */
+export async function loadUserSession(
+  userId: string,
+  encryptionKey: string
+): Promise<{ sessionString: string; apiId: number } | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (adminDb() as any)
+    .from("telegram_sessions")
+    .select("session_string_encrypted, api_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  try {
+    const sessionString = decryptSession(
+      data.session_string_encrypted as string,
+      encryptionKey
+    );
+    return { sessionString, apiId: data.api_id as number };
+  } catch {
+    return null;
+  }
 }

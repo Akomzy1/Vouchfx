@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ConnectFlow from "@/components/telegram/ConnectFlow";
-import { Radio } from "lucide-react";
+import ChannelList, { type ChannelSource } from "@/components/telegram/ChannelList";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Channels" };
@@ -12,9 +12,10 @@ export default async function ChannelsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Read user's Telegram session status (RLS: auth.uid() = user_id)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
+
+  // Telegram session status (RLS: auth.uid() = user_id)
   const { data: session } = await db
     .from("telegram_sessions")
     .select("status, last_connected_at")
@@ -24,6 +25,22 @@ export default async function ChannelsPage() {
   type SessionStatus = "active" | "limited" | "banned" | "disconnected" | "none";
   const status: SessionStatus = session?.status ?? "none";
   const lastConnectedAt: string | null = session?.last_connected_at ?? null;
+  const connected = status === "active" || status === "limited";
+
+  // Signal sources for this user (only if connected)
+  let initialSources: ChannelSource[] = [];
+  if (connected) {
+    const { data: sources } = await db
+      .from("signal_sources")
+      .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    initialSources = (sources ?? []).map((s: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+      ...s,
+      telegram_chat_id: String(s.telegram_chat_id),
+    }));
+  }
 
   return (
     <div className="space-y-6">
@@ -37,22 +54,9 @@ export default async function ChannelsPage() {
       {/* Telegram connection card */}
       <ConnectFlow initialStatus={status} lastConnectedAt={lastConnectedAt} />
 
-      {/* Channel list — populated in P1.4/P1.5 after the listener pool is built */}
-      {status !== "none" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-text-primary">Your channels</p>
-          </div>
-          <div className="card p-8 text-center space-y-2">
-            <Radio size={24} className="mx-auto text-text-muted" />
-            <p className="text-sm text-text-muted">
-              Channel discovery coming in P1.5.
-            </p>
-            <p className="text-xs text-text-muted">
-              Once available, VouchFX will list all channels you belong to so you can choose which ones to copy.
-            </p>
-          </div>
-        </div>
+      {/* Channel list — only shown when Telegram is connected */}
+      {connected && (
+        <ChannelList initialSources={initialSources} />
       )}
     </div>
   );
