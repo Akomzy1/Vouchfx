@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { signOut } from "@/lib/auth/actions";
 import { Lock, LogOut } from "lucide-react";
 import type { Metadata } from "next";
+import BrokerConnections, {
+  type BrokerConnectionRow,
+} from "@/components/broker/BrokerConnections";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -10,6 +13,13 @@ export default async function SettingsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: brokerConnections } = await (supabase as any)
+    .from("broker_connections")
+    .select("id, label, platform, is_active, status, server_hint, last_status_at, created_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -61,6 +71,21 @@ export default async function SettingsPage() {
         </div>
       </div>
 
+      {/* Broker Accounts */}
+      <div className="card divide-y divide-border">
+        <div className="px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-text-secondary mb-0.5">
+            Broker Accounts
+          </p>
+          <p className="text-xs text-text-muted">MT5 / MT4 accounts to copy signals into.</p>
+        </div>
+        <div className="px-4 py-4">
+          <BrokerConnections
+            initialConnections={(brokerConnections ?? []) as BrokerConnectionRow[]}
+          />
+        </div>
+      </div>
+
       {/* Danger zone */}
       <div className="card divide-y divide-border">
         <div className="px-4 py-3">
@@ -82,8 +107,8 @@ export default async function SettingsPage() {
       </div>
 
       <p className="text-xs text-text-muted">
-        Broker connection and Telegram session management are in{" "}
-        <span className="text-primary">Channels</span> and coming in P1.3–P1.4.
+        Telegram session management is in{" "}
+        <span className="text-primary">Channels</span>.
       </p>
     </div>
   );
