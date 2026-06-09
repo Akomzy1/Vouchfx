@@ -20,13 +20,14 @@ import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CONFIDENCE_THRESHOLD, MODELS } from "@vouchfx/config";
 import {
-  parseSignal,
+  parseSignalWithEscalation,
   MetaApiExecutor,
   type BrokerConnection,
   type OrderRequest,
   type TradeRef,
   type SignalJobData,
   type ParsedSignal,
+  type PriorSignalContext,
 } from "@vouchfx/core";
 import {
   writeAuditEvent,
@@ -475,19 +476,60 @@ async function processJob(
     payload: { idempotency_key: idempotencyKey, message_id: messageId, edit_version: editVersion, raw_text: text.slice(0, 500) },
   });
 
-  // ── 2. Parse signal ───────────────────────────────────────────────────────
-  console.log(`${tag} parsing...`);
-  const parsed = await parseSignal(anthropic, text);
-  console.log(`${tag} parsed: is_signal=${parsed.is_signal} confidence=${parsed.confidence.toFixed(2)} symbol=${parsed.symbol ?? "-"} follow_up=${parsed.follow_up_type ?? "none"}`);
+  // ── 2. Build prior-signal context for edits ──────────────────────────────
+  // For edits (editVersion > 0), look up the original parsed_signals row so
+  // the model can classify the change (MODIFY_SL, CANCEL_PENDING, etc.).
+  // The original row is preserved because upsert uses ignoreDuplicates: true.
+  let priorSignal: PriorSignalContext | undefined;
+  if (editVersion > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: prior } = await (db as any)
+      .from("parsed_signals")
+      .select("symbol, side, entries, sl, tps, raw_text")
+      .eq("source_id", sourceId)
+      .eq("telegram_message_id", messageId)
+      .maybeSingle();
 
-  // ── 3. Audit: parsed ──────────────────────────────────────────────────────
+    if (prior) {
+      priorSignal = {
+        symbol: prior.symbol as string | null,
+        side: prior.side as string | null,
+        entries: (prior.entries as number[] | null) ?? [],
+        sl: prior.sl as number | null,
+        tps: (prior.tps as number[] | null) ?? [],
+        rawText: prior.raw_text as string | null,
+      };
+      console.log(`${tag} edit detected — prior signal loaded (${priorSignal.symbol ?? "?"} ${priorSignal.side ?? "?"}) → Sonnet`);
+    } else {
+      console.log(`${tag} edit but no prior signal found — parsing as fresh signal with Haiku→Sonnet cascade`);
+    }
+  }
+
+  // ── 3. Parse signal (with automatic model escalation) ────────────────────
+  // Edits with prior context → Sonnet directly.
+  // Fresh signals → Haiku; if confidence < threshold, escalate to Sonnet.
+  console.log(`${tag} parsing...`);
+  const { signal: parsed, modelUsed } = await parseSignalWithEscalation(anthropic, text, priorSignal);
+  console.log(`${tag} parsed: is_signal=${parsed.is_signal} confidence=${parsed.confidence.toFixed(2)} symbol=${parsed.symbol ?? "-"} follow_up=${parsed.follow_up_type ?? "none"} model=${modelUsed}`);
+
+  // ── 4. Audit: parsed ──────────────────────────────────────────────────────
   await writeAuditEvent(db, {
     userId,
     eventType: "parsed",
-    payload: { is_signal: parsed.is_signal, symbol: parsed.symbol, side: parsed.side, confidence: parsed.confidence, reasoning: parsed.reasoning, follow_up_type: parsed.follow_up_type, model: MODELS.default },
+    payload: {
+      is_signal: parsed.is_signal,
+      symbol: parsed.symbol,
+      side: parsed.side,
+      confidence: parsed.confidence,
+      reasoning: parsed.reasoning,
+      follow_up_type: parsed.follow_up_type,
+      model: modelUsed,
+      escalated: modelUsed !== MODELS.default,
+      edit_version: editVersion,
+    },
   });
 
-  // ── 4. Gate: must be a signal with sufficient confidence ──────────────────
+  // ── 5. Gate: must be a signal with sufficient confidence ──────────────────
   if (!parsed.is_signal) {
     console.log(`${tag} skipped: not a signal`);
     await writeAuditEvent(db, { userId, eventType: "skipped", payload: { reason: "not_a_signal" } });
@@ -500,7 +542,7 @@ async function processJob(
     return;
   }
 
-  // ── 5. Upsert parsed_signal ───────────────────────────────────────────────
+  // ── 6. Upsert parsed_signal ───────────────────────────────────────────────
   const psInsert: ParsedSignalInsert = {
     source_id: sourceId,
     telegram_message_id: messageId,
@@ -544,7 +586,7 @@ async function processJob(
     console.log(`${tag} parsed_signal already persisted (id=${shortId(parsedSignalId)})`);
   }
 
-  // ── 6. Broker connection ──────────────────────────────────────────────────
+  // ── 7. Broker connection ──────────────────────────────────────────────────
   const brokerConn: BrokerConnection = {
     id: brokerConnectionId,
     userId,
@@ -553,7 +595,7 @@ async function processJob(
   };
   executor.register(brokerConn);
 
-  // ── 7. Route: follow-up or new signal ────────────────────────────────────
+  // ── 8. Route: follow-up or new signal ────────────────────────────────────
   const followUpType = parsed.follow_up_type;
 
   if (followUpType && followUpType !== "NEW_SIGNAL") {
