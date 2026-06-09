@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "noEmit": true,
+    "types": ["node"],
+    "outDir": "dist",
+    "paths": {
+      "@vouchfx/config": ["../../packages/config/src/index.ts"],
+      "@vouchfx/core": ["../../packages/core/src/index.ts"],
+      "@vouchfx/db": ["../../packages/db/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

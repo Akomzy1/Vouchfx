@@ -1,0 +1,25 @@
+{
+  "name": "@vouchfx/executor",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --outDir dist --noEmit false",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@vouchfx/config": "workspace:*",
+    "@vouchfx/core": "workspace:*",
+    "@vouchfx/db": "workspace:*",
+    "bullmq": "^5.53.0",
+    "ioredis": "^5.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

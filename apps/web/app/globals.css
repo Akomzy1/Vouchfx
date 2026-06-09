@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-bg:               #0B0F14;
+    --color-surface:          #151B23;
+    --color-surface-elevated: #1B232D;
+    --color-border:           #222B36;
+    --color-primary:          #14B8A6;
+    --color-text-primary:     #E6EDF3;
+    --color-text-secondary:   #8B98A5;
+    --color-text-muted:       #5B6772;
+    --color-profit:           #22C55E;
+    --color-loss:             #EF4444;
+    --color-warning:          #F59E0B;
+  }
+
+  html {
+    background-color: #0B0F14;
+    color: #E6EDF3;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Monospace tabular figures for all financial numbers */
+  .num, [data-num], .price, .pnl, .balance, .equity, .lots, .pips {
+    font-family: ui-monospace, "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Card */
+  .card {
+    @apply rounded-xl border border-border bg-surface;
+  }
+  .card-elevated {
+    @apply rounded-xl border border-border bg-surface-elevated;
+  }
+
+  /* Status pills: dot + label */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .pill-connected {
+    @apply pill text-primary bg-teal-900/30 border border-teal-700/40;
+  }
+  .pill-paused {
+    @apply pill text-warning bg-amber-900/30 border border-amber-700/40;
+  }
+  .pill-error {
+    @apply pill text-loss bg-red-900/30 border border-red-700/40;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-[#04201D] hover:opacity-90 active:opacity-80;
+  }
+  .btn-ghost {
+    @apply btn border border-border text-text-primary hover:bg-surface-elevated;
+  }
+  .btn-destructive {
+    @apply btn text-loss border border-loss/30 hover:bg-red-900/20;
+  }
+}
