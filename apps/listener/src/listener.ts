@@ -1,6 +1,7 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage } from "telegram/events";
+import { DeletedMessage } from "telegram/events/DeletedMessage";
 import { asReadonly, type ReadonlyTelegramClient } from "./readonly-guard";
 
 // ─── idempotency key ─────────────────────────────────────────────────────────
@@ -95,4 +96,41 @@ export async function startListening(
   }, new NewMessage({ chats: chatIdStrings }));
 
   console.log(`[listener] subscribed to ${chatIds.length} chat(s): ${chatIdStrings.slice(0, 5).join(", ")}`);
+}
+
+// ─── delete subscription ──────────────────────────────────────────────────────
+
+export type DeleteCallback = (
+  chatId: bigint,
+  messageIds: number[]
+) => Promise<void>;
+
+/**
+ * Subscribe to message-deleted events for the given chats.
+ *
+ * One handler is registered per chat so each closure captures its own chatId —
+ * GramJS does not always surface the peer entity in delete events for regular
+ * groups, so we avoid re-deriving it from the event.
+ *
+ * READ-ONLY contract: addEventHandler is the only operation called here.
+ * No write operations.
+ */
+export function subscribeDeletes(
+  client: ReadonlyTelegramClient,
+  chatIds: bigint[],
+  onDeleted: DeleteCallback
+): void {
+  if (chatIds.length === 0) return;
+
+  for (const chatId of chatIds) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client.addEventHandler(async (event: any) => {
+      const deletedIds: number[] = event.deletedIds ?? [];
+      if (deletedIds.length > 0) {
+        await onDeleted(chatId, deletedIds);
+      }
+    }, new DeletedMessage({ chats: [chatId.toString()] }));
+  }
+
+  console.log(`[listener] delete subscription on ${chatIds.length} chat(s)`);
 }

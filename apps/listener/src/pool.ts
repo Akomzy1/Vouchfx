@@ -16,7 +16,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Queue } from "bullmq";
 import { decryptSession, type SignalJobData } from "@vouchfx/core";
 import { parseEnv } from "@vouchfx/config";
-import { createReadonlyClient, startListening } from "./listener";
+import { createReadonlyClient, startListening, subscribeDeletes } from "./listener";
 import { updateSessionStatus } from "./session-manager";
 
 const SPIKE_SOURCE_ID = "00000000-0000-0000-0000-000000000002";
@@ -230,6 +230,7 @@ export class UserPool {
       const sourceId = effectiveChatSourceMap.get(chatId) ?? SPIKE_SOURCE_ID;
 
       const jobData: SignalJobData = {
+        jobType: "signal",
         idempotencyKey,
         chatId,
         messageId,
@@ -250,6 +251,16 @@ export class UserPool {
       console.log(`[pool] user=${userId} enqueued job=${idempotencyKey}`);
     });
 
+    // Subscribe to delete events — channels/supergroups only; chats filter
+    // is unreliable for regular groups (GramJS limitation, see DeletedMessage docs).
+    subscribeDeletes(client, chatIds, async (chatId, messageIds) => {
+      const chatIdStr = chatId.toString();
+      const sourceId = effectiveChatSourceMap.get(chatIdStr) ?? SPIKE_SOURCE_ID;
+      for (const msgId of messageIds) {
+        await this.handleDeletedMessage(userId, chatIdStr, msgId, sourceId, brokerConnectionId);
+      }
+    });
+
     this.entries.set(userId, {
       userId,
       chatIds: new Set(effectiveChatSourceMap.keys()),
@@ -260,6 +271,71 @@ export class UserPool {
 
     await updateSessionStatus(userId, "active").catch(() => {});
     console.log(`[pool] user ${userId} connected — ${chatIds.length} channel(s)`);
+  }
+
+  /**
+   * Called when a Telegram message is deleted.
+   * If a PENDING trade exists for that signal, emits a cancel job.
+   * Open (filled) positions are left untouched — the user decides.
+   */
+  private async handleDeletedMessage(
+    userId: string,
+    chatId: string,
+    messageId: number,
+    sourceId: string,
+    brokerConnectionId: string
+  ): Promise<void> {
+    // Look up the parsed_signal for this (source, message) pair
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: ps } = await (this.db as any)
+      .from("parsed_signals")
+      .select("id")
+      .eq("source_id", sourceId)
+      .eq("telegram_message_id", messageId)
+      .maybeSingle();
+
+    if (!ps) {
+      // Message was never parsed as a signal — nothing to cancel
+      return;
+    }
+
+    const parsedSignalId = (ps as { id: string }).id;
+
+    // Only cancel if there is a PENDING (unfilled) order — not OPEN positions
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: pending } = await (this.db as any)
+      .from("trades")
+      .select("id")
+      .eq("parsed_signal_id", parsedSignalId)
+      .eq("status", "PENDING");
+
+    if (!pending || (pending as unknown[]).length === 0) {
+      console.log(`[pool] delete msg=${messageId} — no PENDING trades, skipping cancel`);
+      return;
+    }
+
+    const idempotencyKey = `${chatId}:${messageId}:cancel`;
+    const jobData: SignalJobData = {
+      jobType: "cancel",
+      idempotencyKey,
+      chatId,
+      messageId,
+      editVersion: 0,
+      text: "",
+      hasMedia: false,
+      sourceId,
+      userId,
+      brokerConnectionId,
+      cancelTargetSignalId: parsedSignalId,
+    };
+
+    await this.queue.add("signal", jobData, {
+      jobId: idempotencyKey,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 2000 },
+    });
+
+    console.log(`[pool] delete msg=${messageId} → cancel job enqueued (signal=${parsedSignalId.slice(0, 8)})`);
   }
 
   private async removeEntry(userId: string): Promise<void> {

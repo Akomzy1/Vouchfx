@@ -54,7 +54,7 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
-/** Look up the active trade legs for an originating Telegram message id. */
+/** Look up active trade legs via a follow-up reference to the originating message. */
 async function findActiveTrades(
   db: TypedClient,
   sourceId: string,
@@ -69,15 +69,21 @@ async function findActiveTrades(
     .maybeSingle();
 
   if (!origPs) return [];
+  return findActiveTradesBySignalId(db, (origPs as { id: string }).id);
+}
 
+/** Look up active trade legs directly by parsed_signal_id — used by cancel jobs. */
+async function findActiveTradesBySignalId(
+  db: TypedClient,
+  parsedSignalId: string
+): Promise<TradeRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: trades } = await (db as any)
+  const { data } = await (db as any)
     .from("trades")
     .select("*")
-    .eq("parsed_signal_id", (origPs as { id: string }).id)
+    .eq("parsed_signal_id", parsedSignalId)
     .in("status", ["PENDING", "OPEN"]);
-
-  return (trades ?? []) as TradeRow[];
+  return (data ?? []) as TradeRow[];
 }
 
 // ── Follow-up dispatch ────────────────────────────────────────────────────────
@@ -353,6 +359,97 @@ async function executeNewSignal(
   });
 }
 
+// ── Pre-classified cancel jobs ────────────────────────────────────────────────
+
+/**
+ * Handle a cancel job emitted by the listener when a Telegram message is
+ * deleted. Bypasses the Claude parser — action is pre-determined:
+ *   PENDING order  → cancelPending (delete the unfilled order)
+ *   Filled/OPEN    → closePosition (already filled; user policy: close it)
+ */
+async function handleCancelJob(
+  job: Job<SignalJobData>,
+  deps: WorkerDeps
+): Promise<void> {
+  const { idempotencyKey, cancelTargetSignalId, userId, brokerConnectionId } = job.data;
+  const tag = `[${idempotencyKey}]`;
+
+  if (!cancelTargetSignalId) {
+    console.log(`${tag} cancel job missing cancelTargetSignalId — skipping`);
+    return;
+  }
+
+  console.log(`${tag} cancel job for signal=${cancelTargetSignalId.slice(0, 8)}`);
+
+  await writeAuditEvent(deps.db, {
+    userId,
+    eventType: "received",
+    parsedSignalId: cancelTargetSignalId,
+    payload: { idempotency_key: idempotencyKey, source: "telegram_delete" },
+  });
+
+  const activeTrades = await findActiveTradesBySignalId(deps.db, cancelTargetSignalId);
+
+  if (activeTrades.length === 0) {
+    console.log(`${tag} cancel: no PENDING/OPEN trades — already settled, skipping`);
+    return;
+  }
+
+  const brokerConn: BrokerConnection = {
+    id: brokerConnectionId,
+    userId,
+    metaApiAccountId: deps.spikeMetaApiAccountId,
+    platform: "MT5",
+  };
+  deps.executor.register(brokerConn);
+
+  let cancelledCount = 0;
+  let closedCount = 0;
+
+  for (const trade of activeTrades) {
+    if (!trade.broker_order_id) continue;
+    const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id };
+    try {
+      const state = await deps.executor.getState(ref);
+      if (state === "FILLED") {
+        await deps.executor.closePosition(ref);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (deps.db as any)
+          .from("trades")
+          .update({ status: "CLOSED", closed_at: new Date().toISOString() })
+          .eq("id", trade.id);
+        closedCount++;
+        console.log(`${tag} cancel→close (already filled) ${shortId(trade.id)}`);
+      } else {
+        await deps.executor.cancelPending(ref);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (deps.db as any)
+          .from("trades")
+          .update({ status: "CANCELLED" })
+          .eq("id", trade.id);
+        cancelledCount++;
+        console.log(`${tag} cancelled PENDING ${shortId(trade.id)}`);
+      }
+    } catch (err) {
+      console.error(`${tag} cancel trade ${shortId(trade.id)} error:`, (err as Error).message);
+      await writeAuditEvent(deps.db, {
+        userId,
+        eventType: "error",
+        parsedSignalId: cancelTargetSignalId,
+        tradeId: trade.id,
+        payload: { error: (err as Error).message, source: "telegram_delete" },
+      });
+    }
+  }
+
+  await writeAuditEvent(deps.db, {
+    userId,
+    eventType: "cancelled",
+    parsedSignalId: cancelTargetSignalId,
+    payload: { source: "telegram_delete", cancelled: cancelledCount, closed: closedCount },
+  });
+}
+
 // ── Main job processor ────────────────────────────────────────────────────────
 
 async function processJob(
@@ -360,6 +457,12 @@ async function processJob(
   deps: WorkerDeps
 ): Promise<void> {
   const { db, anthropic, executor, spikeMetaApiAccountId } = deps;
+  // ── 0. Cancel fast-path (pre-classified by listener on message delete) ─────
+  if (job.data.jobType === "cancel") {
+    await handleCancelJob(job, deps);
+    return;
+  }
+
   const { idempotencyKey, messageId, editVersion, text, sourceId, userId, brokerConnectionId } =
     job.data;
   const tag = `[${idempotencyKey}]`;
