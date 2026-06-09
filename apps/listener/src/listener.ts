@@ -51,18 +51,29 @@ export type MessageCallback = (
 ) => Promise<void>;
 
 /**
- * Connect the client and subscribe to new messages on `chatId`.
+ * Connect the client and subscribe to new messages on the given chat IDs.
  *
  * READ-ONLY contract: the ONLY operations called on `client` here are
  * connect() and addEventHandler(). No send/edit/delete/join/leave/react.
+ *
+ * If chatIds is empty the client connects but subscribes to nothing — it
+ * stays warm for when P1.5 populates signal_sources and sync() reconnects it.
  */
 export async function startListening(
   client: ReadonlyTelegramClient,
-  chatId: bigint,
+  chatIds: bigint[],
   onMessage: MessageCallback
 ): Promise<void> {
   await client.connect();
-  console.log("[listener] connected to Telegram");
+
+  if (chatIds.length === 0) {
+    console.log("[listener] connected — no channels configured yet");
+    return;
+  }
+
+  // GramJS EntityLike accepts string chat ids; toString() since native bigint
+  // is not in EntityLike in this GramJS version.
+  const chatIdStrings = chatIds.map(id => id.toString());
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client.addEventHandler(async (event: any) => {
@@ -70,7 +81,7 @@ export async function startListening(
     if (!message) return;
 
     const msgChatId: bigint =
-      typeof event.chatId === "bigint" ? event.chatId : chatId;
+      typeof event.chatId === "bigint" ? event.chatId : BigInt(0);
     const msgId: number = message.id as number;
     // editDate is a Unix timestamp (seconds) set by Telegram when a message
     // is edited. 0 means never edited (new message).
@@ -81,9 +92,7 @@ export async function startListening(
     const hasMedia: boolean = Boolean(message.media);
 
     await onMessage(key, text, hasMedia, event);
-  // GramJS EntityLike accepts string chat ids; use toString() since native bigint
-  // is not in EntityLike in this GramJS version.
-  }, new NewMessage({ chats: [chatId.toString()] }));
+  }, new NewMessage({ chats: chatIdStrings }));
 
-  console.log(`[listener] subscribed to chat ${chatId.toString()}`);
+  console.log(`[listener] subscribed to ${chatIds.length} chat(s): ${chatIdStrings.slice(0, 5).join(", ")}`);
 }
