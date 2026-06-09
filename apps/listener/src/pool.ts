@@ -221,7 +221,7 @@ export class UserPool {
     const chatIds = [...effectiveChatSourceMap.keys()].map(id => BigInt(id));
     const client = createReadonlyClient(apiId, this.env.TELEGRAM_API_HASH, sessionString);
 
-    await startListening(client, chatIds, async (idempotencyKey, text, hasMedia) => {
+    await startListening(client, chatIds, async (idempotencyKey, text, hasMedia, imageBase64) => {
       const parts = idempotencyKey.split(":");
       const chatId = parts[0]!;
       const messageId = parseInt(parts[1]!, 10);
@@ -237,6 +237,7 @@ export class UserPool {
         editVersion,
         text,
         hasMedia,
+        imageBase64,
         sourceId,
         userId,
         brokerConnectionId,

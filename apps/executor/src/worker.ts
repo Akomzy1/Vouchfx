@@ -464,7 +464,7 @@ async function processJob(
     return;
   }
 
-  const { idempotencyKey, messageId, editVersion, text, sourceId, userId, brokerConnectionId } =
+  const { idempotencyKey, messageId, editVersion, text, sourceId, userId, brokerConnectionId, imageBase64 } =
     job.data;
   const tag = `[${idempotencyKey}]`;
 
@@ -506,10 +506,11 @@ async function processJob(
   }
 
   // ── 3. Parse signal (with automatic model escalation) ────────────────────
+  // Vision (imageBase64 present) → Sonnet directly with multimodal content.
   // Edits with prior context → Sonnet directly.
-  // Fresh signals → Haiku; if confidence < threshold, escalate to Sonnet.
-  console.log(`${tag} parsing...`);
-  const { signal: parsed, modelUsed } = await parseSignalWithEscalation(anthropic, text, priorSignal);
+  // Fresh text signals → Haiku; if confidence < threshold, escalate to Sonnet.
+  console.log(`${tag} parsing${imageBase64 ? " (vision)" : ""}...`);
+  const { signal: parsed, modelUsed } = await parseSignalWithEscalation(anthropic, text, priorSignal, imageBase64);
   console.log(`${tag} parsed: is_signal=${parsed.is_signal} confidence=${parsed.confidence.toFixed(2)} symbol=${parsed.symbol ?? "-"} follow_up=${parsed.follow_up_type ?? "none"} model=${modelUsed}`);
 
   // ── 4. Audit: parsed ──────────────────────────────────────────────────────
@@ -526,6 +527,7 @@ async function processJob(
       model: modelUsed,
       escalated: modelUsed !== MODELS.default,
       edit_version: editVersion,
+      vision: Boolean(imageBase64),
     },
   });
 

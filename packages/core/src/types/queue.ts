@@ -28,6 +28,12 @@ export interface SignalJobData {
   /** Raw message text. Empty string for cancel jobs. */
   text: string;
   hasMedia: boolean;
+  /**
+   * Base64-encoded JPEG from the Telegram photo, for vision parsing.
+   * Only present when the message contained a photo and the download succeeded.
+   * Absent for cancel jobs, text-only messages, and failed downloads.
+   */
+  imageBase64?: string;
   /** UUID — signal_sources.id */
   sourceId: string;
   /** UUID — users.id */

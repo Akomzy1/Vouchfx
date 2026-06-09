@@ -43,10 +43,15 @@ export function createReadonlyClient(
 
 // ─── subscription ────────────────────────────────────────────────────────────
 
+/** 4 MB cap — Telegram photos compress to <500 KB typically; guards against large documents. */
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
 export type MessageCallback = (
   idempotencyKey: string,
   text: string,
   hasMedia: boolean,
+  /** Base64 JPEG if the message is a photo and the download succeeded; undefined otherwise. */
+  imageBase64: string | undefined,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rawEvent: any
 ) => Promise<void>;
@@ -92,7 +97,24 @@ export async function startListening(
     const text: string = (message.text as string | undefined) ?? "";
     const hasMedia: boolean = Boolean(message.media);
 
-    await onMessage(key, text, hasMedia, event);
+    // Download photo bytes for vision parsing. Only attempt for Telegram-compressed
+    // photos (message.photo is truthy). Documents are skipped — they may be large
+    // and rarely carry trading signals as images.
+    let imageBase64: string | undefined;
+    if (message.photo) {
+      try {
+        const buf = await client.downloadMedia(message, {});
+        if (Buffer.isBuffer(buf) && buf.length <= MAX_IMAGE_BYTES) {
+          imageBase64 = buf.toString("base64");
+        } else if (Buffer.isBuffer(buf)) {
+          console.warn(`[listener] msg ${msgId}: photo too large (${buf.length} bytes), skipping vision`);
+        }
+      } catch (err) {
+        console.warn(`[listener] msg ${msgId}: photo download failed:`, (err as Error).message);
+      }
+    }
+
+    await onMessage(key, text, hasMedia, imageBase64, event);
   }, new NewMessage({ chats: chatIdStrings }));
 
   console.log(`[listener] subscribed to ${chatIds.length} chat(s): ${chatIdStrings.slice(0, 5).join(", ")}`);

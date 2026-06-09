@@ -19,6 +19,12 @@ export interface ReadonlyTelegramClient {
   disconnect(): Promise<void>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   addEventHandler(callback: (event: any) => Promise<void> | void, event: any): void;
+  /**
+   * Download media bytes from a message or MessageMedia object.
+   * READ-ONLY — fetches from Telegram's CDN; performs no outbound write.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  downloadMedia(messageOrMedia: any, params?: object): Promise<Buffer | string | undefined>;
 }
 
 /**
