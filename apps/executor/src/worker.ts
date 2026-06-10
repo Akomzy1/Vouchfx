@@ -46,7 +46,6 @@ export interface WorkerDeps {
   db: TypedClient;
   anthropic: Anthropic;
   executor: MetaApiExecutor;
-  spikeMetaApiAccountId: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -105,6 +104,36 @@ async function findActiveTradesBySymbol(
     .eq("symbol", symbol)
     .in("status", ["PENDING", "OPEN"]);
   return (data ?? []) as TradeRow[];
+}
+
+/**
+ * Fetch the MetaApi account ID and platform for a broker connection.
+ * Throws if the connection is not found or has not yet been provisioned.
+ */
+async function lookupBrokerConn(
+  db: TypedClient,
+  brokerConnectionId: string
+): Promise<{ metaApiAccountId: string; platform: "MT5" | "MT4" }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db as any)
+    .from("broker_connections")
+    .select("metaapi_account_id, platform")
+    .eq("id", brokerConnectionId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(`[worker] broker connection not found: ${brokerConnectionId}`);
+  }
+
+  const metaApiAccountId = (data as { metaapi_account_id: string | null }).metaapi_account_id;
+  if (!metaApiAccountId) {
+    throw new Error(
+      `[worker] broker connection ${brokerConnectionId} has no MetaApi account ID — still deploying?`
+    );
+  }
+
+  const platform = ((data as { platform: string }).platform ?? "MT5") as "MT5" | "MT4";
+  return { metaApiAccountId, platform };
 }
 
 // ── Follow-up dispatch ────────────────────────────────────────────────────────
@@ -297,11 +326,20 @@ async function executeNewSignal(
     return;
   }
 
+  // ── Resolve order type and entry price ──────────────────────────────────
+  // Use the parser's order_type; fall back to MARKET if LIMIT/STOP has no entry.
+  const parsedOrderType = parsed.order_type ?? "MARKET";
+  const entryPrice: number | undefined = parsed.entries[0];
+  const orderType: "MARKET" | "LIMIT" | "STOP" =
+    parsedOrderType !== "MARKET" && entryPrice == null
+      ? (console.warn(`${tag} ${parsedOrderType} order has no entry price — falling back to MARKET`), "MARKET")
+      : (parsedOrderType as "MARKET" | "LIMIT" | "STOP");
+
   // ── Build TP legs ────────────────────────────────────────────────────────
   // Each TP → one trade leg. No TPs → one leg without a TP target.
   const tpLegs: (number | null)[] = parsed.tps.length > 0 ? parsed.tps : [null];
 
-  console.log(`${tag} placing ${tpLegs.length} leg(s) on ${resolvedSymbol}`);
+  console.log(`${tag} placing ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}`);
 
   for (let i = 0; i < tpLegs.length; i++) {
     const tp = tpLegs[i];
@@ -314,7 +352,7 @@ async function executeNewSignal(
       broker_connection_id: brokerConnectionId,
       symbol: parsed.symbol,
       side: parsed.side,
-      volume: SPIKE_LEG_VOLUME,
+      volume: SPIKE_LEG_VOLUME, // risk engine (P1.14) will supply real volume
       sl: parsed.sl ?? undefined,
       tp: tp ?? undefined,
       status: "PENDING",
@@ -339,8 +377,9 @@ async function executeNewSignal(
       connectionId: brokerConnectionId,
       symbol: resolvedSymbol,
       side: parsed.side,
-      orderType: "MARKET",
-      volume: SPIKE_LEG_VOLUME,
+      orderType,
+      volume: SPIKE_LEG_VOLUME, // risk engine (P1.14) will supply real volume
+      entryPrice,
       sl: parsed.sl ?? undefined,
       tp: tp ?? undefined,
       clientOrderId: legKey,
@@ -427,11 +466,12 @@ async function handleCancelJob(
     return;
   }
 
+  const { metaApiAccountId, platform } = await lookupBrokerConn(deps.db, brokerConnectionId);
   const brokerConn: BrokerConnection = {
     id: brokerConnectionId,
     userId,
-    metaApiAccountId: deps.spikeMetaApiAccountId,
-    platform: "MT5",
+    metaApiAccountId,
+    platform,
   };
   deps.executor.register(brokerConn);
 
@@ -488,7 +528,7 @@ async function processJob(
   job: Job<SignalJobData>,
   deps: WorkerDeps
 ): Promise<void> {
-  const { db, anthropic, executor, spikeMetaApiAccountId } = deps;
+  const { db, anthropic, executor } = deps;
   // ── 0. Cancel fast-path (pre-classified by listener on message delete) ─────
   if (job.data.jobType === "cancel") {
     await handleCancelJob(job, deps);
@@ -620,11 +660,12 @@ async function processJob(
   }
 
   // ── 7. Broker connection ──────────────────────────────────────────────────
+  const { metaApiAccountId, platform } = await lookupBrokerConn(db, brokerConnectionId);
   const brokerConn: BrokerConnection = {
     id: brokerConnectionId,
     userId,
-    metaApiAccountId: spikeMetaApiAccountId,
-    platform: "MT5",
+    metaApiAccountId,
+    platform,
   };
   executor.register(brokerConn);
 
