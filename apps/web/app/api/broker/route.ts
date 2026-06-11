@@ -78,15 +78,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const platform: MtPlatform = body.platform ?? "mt5";
+  const platform: MtPlatform = ((body.platform ?? "mt5") as string).toLowerCase() as MtPlatform;
   const region: MetaApiRegion = body.region ?? "new-york";
-  const label = body.label?.trim() || `MT5 ${login}`;
+  const loginStr = String(login);
+  const label = body.label?.trim() || `MT5 ${loginStr}`;
 
   let metaApiAccountId: string;
   try {
     metaApiAccountId = await createMetaApiAccount({
       token,
-      login,
+      login: loginStr,
       password,
       server,
       name: `VouchFX — ${label}`,

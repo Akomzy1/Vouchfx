@@ -13,8 +13,7 @@
  * this setup script.
  */
 import { readFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createInterface } from "readline/promises";
@@ -24,8 +23,7 @@ import { parseEnv } from "@vouchfx/config";
 // Load .env for local dev — tsx does not auto-load it.
 // Only set vars not already in process.env so real env always wins.
 {
-  const __dir = dirname(fileURLToPath(import.meta.url));
-  const envFile = join(__dir, "..", ".env");
+  const envFile = join(__dirname, "..", ".env");
   if (existsSync(envFile)) {
     for (const line of readFileSync(envFile, "utf8").split("\n")) {
       const t = line.trim();

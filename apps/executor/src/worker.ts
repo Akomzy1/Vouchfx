@@ -19,9 +19,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CONFIDENCE_THRESHOLD, MODELS, env } from "@vouchfx/config";
+import { MetaApiExecutor } from "@vouchfx/core/executor";
 import {
   parseSignalWithEscalation,
-  MetaApiExecutor,
   gateAndSize,
   DEFAULT_RISK_SETTINGS,
   notify,

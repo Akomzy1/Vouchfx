@@ -2,7 +2,8 @@ import http from "http";
 import { Queue } from "bullmq";
 import Redis from "ioredis";
 import { parseEnv } from "@vouchfx/config";
-import { type SignalJobData, createLogger, initSentry, captureException, startHeartbeat } from "@vouchfx/core";
+import { type SignalJobData, createLogger } from "@vouchfx/core";
+import { initSentry, captureException, startHeartbeat } from "@vouchfx/core/monitoring";
 import { createAdminClientFromEnv } from "@vouchfx/db";
 import { UserPool } from "./pool";
 

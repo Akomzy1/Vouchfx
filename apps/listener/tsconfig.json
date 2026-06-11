@@ -9,6 +9,7 @@
     "paths": {
       "@vouchfx/config": ["../../packages/config/src/index.ts"],
       "@vouchfx/core": ["../../packages/core/src/index.ts"],
+      "@vouchfx/core/monitoring": ["../../packages/core/src/monitoring/index.ts"],
       "@vouchfx/db": ["../../packages/db/src/index.ts"]
     }
   },

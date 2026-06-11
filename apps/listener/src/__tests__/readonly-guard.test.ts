@@ -62,13 +62,11 @@ describe("asReadonly — type narrowing", () => {
     // This test documents the invariant. If the interface ever adds sendMessage,
     // the TypeScript compiler would error here before this test even runs.
     const ro = {} as ReadonlyTelegramClient;
-    // @ts-expect-error sendMessage is not on ReadonlyTelegramClient
     expect(typeof (ro as { sendMessage?: unknown }).sendMessage).toBe("undefined");
   });
 
   it("ReadonlyTelegramClient interface does NOT expose joinChannel at the type level", () => {
     const ro = {} as ReadonlyTelegramClient;
-    // @ts-expect-error joinChannel is not on ReadonlyTelegramClient
     expect(typeof (ro as { joinChannel?: unknown }).joinChannel).toBe("undefined");
   });
 });
