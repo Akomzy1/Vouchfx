@@ -8,8 +8,10 @@ const PROTECTED = new Set([
   "/signals",
   "/risk",
   "/billing",
-  "/referrals",
+  "/refer",
   "/settings",
+  "/onboarding",
+  "/admin",
 ]);
 
 // Auth pages — authenticated users should be redirected away
@@ -60,6 +62,17 @@ export async function middleware(request: NextRequest) {
   if (!user && PROTECTED.has(pathname)) {
     const next = encodeURIComponent(pathname);
     return NextResponse.redirect(new URL(`/login?next=${next}`, request.url));
+  }
+
+  // Capture referral code from ?ref= query param — set 30-day cookie for attribution
+  const ref = request.nextUrl.searchParams.get("ref");
+  if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) {
+    supabaseResponse.cookies.set("vouchfx_ref", ref.toUpperCase(), {
+      httpOnly: true,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      sameSite: "lax",
+    });
   }
 
   return supabaseResponse;

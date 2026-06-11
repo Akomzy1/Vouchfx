@@ -241,11 +241,11 @@ Two distinct programs. **Provider affiliate** is the primary acquisition channel
 
 ### 6.12 Prop Mode (prop-firm rule engine) — Phase 2
 
-Makes VouchFX prop-firm-native: the user selects their firm + challenge, VouchFX loads that firm's exact ruleset and enforces all of it in real time. This is a **Phase 2** module (all items priority **C** = post-MVP) and builds on the existing risk features (`VCH-RSK-03` drawdown guardian, `VCH-RSK-06` news filter, `VCH-RSK-07` stealth) rather than duplicating them. Positioning is **protection, not evasion**: VouchFX enforces *your* firm's rules so you don't breach them by accident.
+Makes VouchFX prop-firm-native: the user selects their firm + challenge, VouchFX loads that firm's exact ruleset and enforces all of it in real time. This is a **Phase 2** module (all items priority **C** = post-MVP) and builds on the existing risk features (`VCH-RSK-03` drawdown guardian, `VCH-RSK-06` news filter, `VCH-RSK-07` stealth) rather than duplicating them. Positioning is **protection, not evasion**: VouchFX enforces *your* firm's rules so you don't breach them by accident. **Phase 2 ships Prop Mode on MT5 only** (reaching MT5-based prop firms); the rule engine is platform-agnostic logic and extends to cTrader/DXTrade/TradeLocker automatically once those land in Phase 3.
 
 | ID | Requirement | Priority | Acceptance criteria |
 |---|---|---|---|
-| VCH-PROP-01 | Firm rule library: versioned, per-firm/per-challenge presets (daily loss, max/trailing drawdown + model, consistency %, news window, weekend/min-days, copy/EA permission), each with a "last verified" date shown to the user | C | Selecting a firm+challenge loads its ruleset; the verification date is visible; presets are versioned |
+| VCH-PROP-01 | Firm rule library: versioned, per-firm/per-challenge presets (daily loss, max/trailing drawdown + model, consistency %, news window, weekend/min-days, copy/EA permission), each with a "last verified" date shown to the user. **Launch criterion: only firms that explicitly permit copy trading / EAs are included** | C | Selecting a firm+challenge loads its ruleset; the verification date is visible; presets are versioned; every included firm permits copy trading |
 | VCH-PROP-02 | Per-account rule profile: each broker account can run a different firm ruleset simultaneously | C | A user with 3 prop accounts across 2 firms enforces the correct ruleset per account independently |
 | VCH-PROP-03 | Real-time equity guardian: watch equity tick-by-tick (not balance) and pre-block or auto-flatten before an equity-based intraday daily-loss or drawdown limit is touched | C | A signal that would breach the live equity limit is blocked/flattened before the threshold; logged with reason |
 | VCH-PROP-04 | Drawdown tracker: model-aware (static / EOD trailing / intraday trailing), tracks the current floor, refuses trades that would breach it | C | Trades that would cross the tracked floor are skipped-with-reason; floor updates per the firm's model |
@@ -255,6 +255,16 @@ Makes VouchFX prop-firm-native: the user selects their firm + challenge, VouchFX
 | VCH-PROP-08 | Stealth execution for multi-account detection: randomised lot within the risk budget, micro-delays, slight SL/TP variation, neutral comments — to avoid copy-group flagging | C | Two accounts copying the same signal do not place identical orders; variation parameters are configurable |
 | VCH-PROP-09 | Copy/EA permission awareness: warn the user if their selected firm restricts copy trading or EAs; never silently assist a TOS breach | C | A firm flagged as copy-restricted shows a clear warning before the user enables copying |
 | VCH-PROP-10 | Pre-trade rule simulation + explainability: before executing, show pass/fail against the active ruleset ("would breach FTMO daily loss") in the audit log | C | Each prop-account signal shows which rules it passed/failed prior to execution |
+
+**Rule Monitor agent (keeps the firm rule library current).** An AI agent monitors supported firms and proposes updates; an assigned human approves the high-stakes ones. This is how the rule library (`VCH-PROP-01`) stays current without manual trawling, and it doubles as the liability record.
+
+| ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| VCH-PROP-11 | Scheduled Rule Monitor agent: on a schedule (e.g. daily), fetch each supported firm's rules/terms source, extract the structured ruleset with an LLM into the rule schema, and diff against the stored record | C | The agent runs on schedule; for each firm it produces a structured ruleset + a diff vs the current stored version; the source URL and fetch time are recorded |
+| VCH-PROP-12 | Confidence-tiered publishing: high-confidence changes to low-stakes fields (e.g. news-window minutes) may auto-publish (logged + reversible); ANY change to account-killing fields (daily loss, drawdown model/%, consistency %) ALWAYS requires human approval regardless of confidence; low-confidence or messy-source changes are flagged for human entry | C | An account-killing-field change never goes live without approval; a low-stakes high-confidence change can auto-publish; low-confidence changes are queued, not published |
+| VCH-PROP-13 | Approval queue + approver role: a first-class "rule approver" permission and a queue showing each flagged change as old → new value, source link, detected date, and agent confidence, with Approve / Reject / Edit actions | C | An approver sees the queue, can open the source, and approve/reject/edit; non-approvers cannot publish rule changes |
+| VCH-PROP-14 | Version-stamping + audit trail: every ruleset version stores who/what published it (agent auto or approver name), when, and the source; the user-facing "rules last verified" date reflects the latest verification | C | Each firm preset shows a last-verified date; every change is attributable to an actor and source in an append-only log |
+| VCH-PROP-15 | Reversible rollback: any published ruleset version can be rolled back to a prior version | C | An approver can revert a firm to a previous ruleset version; the rollback is logged |
 
 ---
 
@@ -329,7 +339,7 @@ Vercel serverless is **not** used for listeners or execution loops (no long-live
 | Priority human support | — | — | — | ✓ | — |
 | Naira checkout (Paystack) | — | ✓ | ✓ | ✓ | ✓ |
 
-Notes: Starter uses regular-reliability MetaApi; Pro/Funded use high-reliability. Lifetime maps to Pro features at 3 accounts (see blueprint §5.3 for the COGS tail-risk caveat). **Prop Mode (§6.12)** ships in Phase 2 on the Funded tier and may anchor a dedicated premium **Prop tier** — prop traders have already paid for challenges and will pay for protection that saves the account.
+Notes: Starter uses regular-reliability MetaApi; Pro/Funded use high-reliability. Lifetime maps to Pro features at 3 accounts (see blueprint §5.3 for the COGS tail-risk caveat). **Prop Mode (§6.12)** ships in Phase 2 on the **Funded tier** (decision per R11); a dedicated premium Prop tier is deferred to Phase 3 when multi-platform coverage strengthens the premium offering.
 
 ---
 
@@ -356,8 +366,8 @@ Notes: Starter uses regular-reliability MetaApi; Pro/Funded use high-reliability
 |---|---|---|
 | **Phase 0 — Spike** | Single-user vertical slice: Telethon → Claude parse → MetaApi MT5 execute → minimal dashboard | 50 consecutive signals across 5 live channel formats executed correctly; e2e < 2s |
 | **Phase 1 — Closed beta (MVP)** | All **M** requirements; Supabase multi-tenancy + RLS; Fly.io listener-per-user; queue; audit log; risk settings; Paystack | 30-day beta with 20 users: missed ≤1/user/week; double-exec 0; NPS > 40 |
-| **Phase 2 — Public launch** | **S** requirements; vision parsing hardening; Stripe (global) + Stripe Tax; prop-firm features; **Prop Mode rule engine (§6.12)**; multi-platform (cTrader/DXTrade/TradeLocker for prop coverage); Lifetime SKU; affiliate program; cTrader Open API | 1,000 paying users; stable COGS |
-| **Phase 3 — Margin & platforms** | Self-hosted MT5-on-Wine failover; Deriv; DXTrade/TradeLocker; MetaApi B2B rate | Blended Starter COGS < $5/mo; gross margin > 70% |
+| **Phase 2 — Public launch** | **S** requirements; vision parsing hardening; Stripe (global) + Stripe Tax; prop-firm features; **Prop Mode rule engine (§6.12), MT5-only**; Lifetime SKU; affiliate program. *Multi-platform deferred to Phase 3 — Prop Mode in this phase reaches MT5-based prop firms only.* | 1,000 paying users; stable COGS |
+| **Phase 3 — Platforms & margin** | **Multi-platform: cTrader Open API, DXTrade, TradeLocker, Deriv** (new Executor implementations behind the existing interface) — extends Prop Mode to non-MT5 firms; self-hosted MT5-on-Wine failover; MetaApi B2B rate | Multi-platform live; blended Starter COGS < $5/mo; gross margin > 70% |
 
 MVP = Phase 1 = all **M**-priority requirements above.
 
@@ -377,7 +387,7 @@ MVP = Phase 1 = all **M**-priority requirements above.
 | R8 | Which Anthropic models are pinned at build time (Haiku 4.5 / Sonnet 4.6 / Opus 4.8 assumed) | Build | Open |
 | R9 | Referral/affiliate commission is flat 20% recurring — confirm whether to keep flat, step down after 12 months, or restrict on Starter tier to protect margin (Starter gross margin is ~$10; 20% ≈ $3.80) | Client | Open |
 | R10 | Stripe billing entity — Stripe is not available to Nigerian-registered businesses, so global billing must run through a UK Ltd (e.g. AkomzyAi) or US LLC; confirm which entity bills customers and who owns VAT/sales-tax filing. Paystack covers Nigerian/NGN buyers regardless. | Client | Open |
-| R11 | Prop Mode (§6.12) — confirm (a) the ongoing process/owner for keeping the firm rule library current and version-stamped, and (b) the "protection, not evasion" positioning given some firms ban copy trading; decide whether Prop Mode anchors a dedicated premium Prop tier | Client/Product | Open |
+| R11 | Prop Mode (§6.12) — **resolved**: (a) maintenance via the Rule Monitor agent (VCH-PROP-11..15) with the approver as a **fillable role**; (b) launch firms restricted to those **explicitly permitting copy trading/EAs** (e.g. FundingPips, The5ers, FXIFY, BrightFunded — verify at seeding); (c) **pricing: Prop Mode ships on the Funded tier ($79)** — a dedicated premium Prop tier is deferred to Phase 3, when multi-platform coverage strengthens the premium offering (entitlement check is flag-based per P2.13, so the tier can be introduced without restructuring). Launch-firm count to be set at seeding (P2.2). | Client/Product | Resolved |
 | R12 | Execution Mode — confirmed default is that hard caps (daily signal limit, max trades/day, daily loss cap) stay enforced even in "Mirror provider exactly" mode. Confirm this is desired, or whether a fully-raw mode (caps off) should ever be offered (not recommended — account-safety risk) | Client/Product | Open |
 
 ---

@@ -36,6 +36,7 @@ import type {
   TradeRef,
   OrderChanges,
   TradeState,
+  SymbolSpec,
 } from "../types/executor";
 
 import { SYMBOL_VARIANTS } from "./symbol-map";
@@ -94,6 +95,52 @@ export class MetaApiExecutor implements Executor {
       currency: info.currency as string,
       leverage: info.leverage as number,
       broker: (info.broker as string | undefined) ?? "Unknown",
+    };
+  }
+
+  async getAccountBalance(conn: BrokerConnection): Promise<number> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    const info = await connection.getAccountInformation();
+    return info.balance as number;
+  }
+
+  async getAccountInfo(conn: BrokerConnection): Promise<{ balance: number; equity: number }> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    const info = await connection.getAccountInformation();
+    return { balance: info.balance as number, equity: info.equity as number };
+  }
+
+  async getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const deals: any[] = await connection.getDealsByTimeRange(since, new Date());
+      return deals.reduce((sum: number, d: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return sum + (Number((d as any).profit) || 0);
+      }, 0);
+    } catch {
+      // History API unavailable on this account type (e.g. demo, read-only)
+      return 0;
+    }
+  }
+
+  async getSymbolSpec(symbol: string, conn: BrokerConnection): Promise<SymbolSpec> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s: any = await connection.getSymbolSpecification(symbol);
+    return {
+      symbol,
+      contractSize: (s.contractSize as number) ?? 100_000,
+      tickSize: (s.tickSize as number) ?? 0.00001,
+      tickValue: (s.tickValue as number) ?? 1.0,
+      volumeStep: (s.volumeStep as number) ?? 0.01,
+      volumeMin: (s.minVolume as number) ?? 0.01,
+      volumeMax: (s.maxVolume as number) ?? 500,
     };
   }
 

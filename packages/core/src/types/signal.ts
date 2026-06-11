@@ -40,6 +40,8 @@ export const ParsedSignalSchema = z.object({
   confidence: z.number().min(0).max(1),
   /** Plain-English explanation shown verbatim in the audit log. */
   reasoning: z.string(),
+  /** Lot size explicitly stated in the signal (e.g. "0.5 lot"). Used only in mirror mode with provider_lot sizing. */
+  provider_lot: z.number().positive().nullable().default(null),
   follow_up_type: FollowUpTypeSchema.nullable(),
   /** True when this message modifies/cancels a prior trade in this channel. */
   references_prior_trade: z.boolean().default(false),

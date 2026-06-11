@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Menu, LogOut, ChevronDown } from "lucide-react";
 import { signOut } from "@/lib/auth/actions";
+import NotificationBell from "@/components/notifications/NotificationBell";
 import type { User } from "@supabase/supabase-js";
 
 interface TopBarProps {
@@ -39,43 +40,47 @@ export default function TopBar({
         <ConnectionPill label="Telegram" status={telegramStatus} />
       </div>
 
-      {/* User menu */}
-      <div className="relative">
-        <button
-          onClick={() => setUserMenuOpen((v) => !v)}
-          className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-elevated transition-colors"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
-            {initials}
-          </div>
-          <span className="hidden sm:block text-xs text-text-secondary max-w-[120px] truncate">
-            {email}
-          </span>
-          <ChevronDown size={14} className="text-text-muted" />
-        </button>
+      {/* Bell + user menu */}
+      <div className="flex items-center gap-2">
+        <NotificationBell userId={user.id} />
 
-        {userMenuOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-10"
-              onClick={() => setUserMenuOpen(false)}
-            />
-            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-border bg-surface-elevated shadow-lg">
-              <div className="px-3 py-2 border-b border-border">
-                <p className="text-xs text-text-muted truncate">{email}</p>
-              </div>
-              <form action={signOut}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
-                >
-                  <LogOut size={14} />
-                  Sign out
-                </button>
-              </form>
+        <div className="relative">
+          <button
+            onClick={() => setUserMenuOpen((v) => !v)}
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-elevated transition-colors"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">
+              {initials}
             </div>
-          </>
-        )}
+            <span className="hidden sm:block text-xs text-text-secondary max-w-[120px] truncate">
+              {email}
+            </span>
+            <ChevronDown size={14} className="text-text-muted" />
+          </button>
+
+          {userMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setUserMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-border bg-surface-elevated shadow-lg">
+                <div className="px-3 py-2 border-b border-border">
+                  <p className="text-xs text-text-muted truncate">{email}</p>
+                </div>
+                <form action={signOut}>
+                  <button
+                    type="submit"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
+                  >
+                    <LogOut size={14} />
+                    Sign out
+                  </button>
+                </form>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </header>
   );

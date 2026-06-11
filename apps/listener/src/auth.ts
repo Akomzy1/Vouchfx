@@ -2,7 +2,7 @@
  * One-time helper: authenticate with Telegram and print the session string.
  *
  * Run ONCE to generate TELEGRAM_SESSION_STRING:
- *   pnpm --filter @vouchfx/listener exec tsx src/auth.ts
+ *   pnpm --filter @vouchfx/listener auth
  *
  * Copy the printed string into your .env file (or Supabase Vault for production).
  * The session string is sensitive — treat it like a password.
@@ -12,11 +12,32 @@
  * the listener. The read-only rule applies to the running listener, not to
  * this setup script.
  */
+import { readFileSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createInterface } from "readline/promises";
 import { stdin, stdout } from "process";
 import { parseEnv } from "@vouchfx/config";
+
+// Load .env for local dev — tsx does not auto-load it.
+// Only set vars not already in process.env so real env always wins.
+{
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const envFile = join(__dir, "..", ".env");
+  if (existsSync(envFile)) {
+    for (const line of readFileSync(envFile, "utf8").split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      const eq = t.indexOf("=");
+      if (eq === -1) continue;
+      const k = t.slice(0, eq).trim();
+      const v = t.slice(eq + 1).trim();
+      if (k && !(k in process.env)) process.env[k] = v;
+    }
+  }
+}
 
 (async () => {
   const env = parseEnv();

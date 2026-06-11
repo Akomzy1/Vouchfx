@@ -1,40 +1,37 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import StatusPill from "@/components/ui/StatusPill";
+import Link from "next/link";
+import { ArrowRight, TrendingUp, TrendingDown, Minus, FlaskConical } from "lucide-react";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Signals" };
 export const dynamic = "force-dynamic";
 
-type ParsedSignalRow = {
-  id: string;
-  symbol: string | null;
-  signal_side: string | null;
-  order_type: string | null;
-  confidence: number | null;
-  is_signal: boolean | null;
-  follow_up_type: string | null;
-  created_at: string;
-  raw_text: string | null;
-};
+function tsShort(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-type TradeRow = {
-  id: string;
-  parsed_signal_id: string;
-  symbol: string;
-  status: string;
-  entry_price: number | null;
-  sl_price: number | null;
-  volume: number | null;
-  created_at: string;
-};
+function confidenceColor(v: number) {
+  const pct = Math.round(v * 100);
+  return pct >= 85 ? "text-profit" : pct >= 70 ? "text-warning" : "text-loss";
+}
 
-type AuditEventRow = {
-  id: string;
-  event_type: string;
-  created_at: string;
-  payload: Record<string, unknown> | null;
-};
+function outcomeLabel(_followUpType: string | null, trades: { parsed_signal_id: string; status: string; is_simulated: boolean }[], signalId: string) {
+  const legs = trades.filter((t) => t.parsed_signal_id === signalId);
+  if (legs.length === 0) return { label: "Skipped", cls: "text-text-muted", simulated: false };
+  const simulated = legs.every((t) => t.is_simulated);
+  const open = legs.filter((t) => t.status === "OPEN" || t.status === "PENDING").length;
+  const closed = legs.filter((t) => t.status === "CLOSED").length;
+  if (open > 0) return { label: `${open} open`, cls: "text-profit", simulated };
+  if (closed > 0) return { label: "Closed", cls: "text-text-secondary", simulated };
+  return { label: "Filled", cls: "text-text-secondary", simulated };
+}
 
 export default async function SignalsPage() {
   const supabase = await createClient();
@@ -44,226 +41,124 @@ export default async function SignalsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
 
-  const [{ data: signals }, { data: trades }, { data: auditEvents }] = await Promise.all([
+  const [{ data: signals }, { data: tradeSummary }] = await Promise.all([
     db.from("parsed_signals")
-      .select("id, symbol, signal_side, order_type, confidence, is_signal, follow_up_type, created_at, raw_text")
+      .select("id, symbol, side, order_type, confidence, is_signal, follow_up_type, created_at, reasoning, model_used")
       .order("created_at", { ascending: false })
-      .limit(50),
+      .limit(100),
     db.from("trades")
-      .select("id, parsed_signal_id, symbol, status, entry_price, sl_price, volume, created_at")
+      .select("parsed_signal_id, status, is_simulated")
       .order("created_at", { ascending: false })
-      .limit(50),
-    db.from("audit_events")
-      .select("id, event_type, created_at, payload")
-      .order("created_at", { ascending: false })
-      .limit(50),
+      .limit(200),
   ]);
 
+  const rows = (signals ?? []) as {
+    id: string;
+    symbol: string | null;
+    side: string | null;
+    order_type: string | null;
+    confidence: number;
+    is_signal: boolean;
+    follow_up_type: string | null;
+    created_at: string;
+    reasoning: string;
+    model_used: string;
+  }[];
+
+  const trades = (tradeSummary ?? []) as { parsed_signal_id: string; status: string; is_simulated: boolean }[];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-text-primary">Signals</h1>
         <p className="text-sm text-text-secondary mt-0.5">
-          Parsed signals, executed trades, and the full audit trail.
+          Every parsed message — click a row to inspect the full audit trail.
         </p>
       </div>
 
-      {/* Signals */}
-      <Section title="Parsed Signals" count={(signals ?? []).length}>
-        {(signals ?? []).length === 0 ? (
-          <Empty message="No signals parsed yet. Connect Telegram and add a channel." />
-        ) : (
-          <div className="card overflow-x-auto">
+      {rows.length === 0 ? (
+        <div className="card p-12 text-center">
+          <p className="text-sm text-text-muted">No signals yet. Connect Telegram and add a channel.</p>
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  {["Time", "Symbol", "Side", "Type", "Confidence", "Kind"].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary whitespace-nowrap">
+                  {["Time", "Symbol", "Side", "Type", "Confidence", "Model", "Outcome", ""].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary whitespace-nowrap"
+                    >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {(signals as ParsedSignalRow[]).map((s) => (
-                  <tr key={s.id} className="border-b border-border last:border-0 hover:bg-surface-elevated">
-                    <td className="px-4 py-2.5 text-xs text-text-muted whitespace-nowrap">
-                      <Ts value={s.created_at} />
-                    </td>
-                    <td className="num px-4 py-2.5 font-medium text-text-primary">{s.symbol ?? "—"}</td>
-                    <td className="px-4 py-2.5">
-                      <SideBadge side={s.signal_side} />
-                    </td>
-                    <td className="px-4 py-2.5 text-xs text-text-secondary">{s.order_type ?? "—"}</td>
-                    <td className="num px-4 py-2.5 text-text-secondary">
-                      {s.confidence != null ? (
-                        <ConfidenceBadge value={s.confidence} />
-                      ) : "—"}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {s.is_signal ? (
-                        <StatusPill status="live" label="Signal" />
-                      ) : (
-                        <StatusPill status="pending" label={s.follow_up_type ?? "Follow-up"} />
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((s) => {
+                  const outcome = outcomeLabel(s.follow_up_type, trades, s.id);
+                  return (
+                    <tr
+                      key={s.id}
+                      className="border-b border-border last:border-0 hover:bg-surface-elevated/60 transition-colors"
+                    >
+                      <td className="px-4 py-2.5 text-xs text-text-muted whitespace-nowrap">
+                        {tsShort(s.created_at)}
+                      </td>
+                      <td className="num px-4 py-2.5 font-semibold text-text-primary">
+                        {s.symbol ?? <span className="text-text-muted font-normal">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {s.side === "BUY" ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-profit">
+                            <TrendingUp size={12} /> BUY
+                          </span>
+                        ) : s.side === "SELL" ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-loss">
+                            <TrendingDown size={12} /> SELL
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-text-muted">
+                            <Minus size={12} />
+                            {s.follow_up_type ?? "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-text-secondary">
+                        {s.order_type ?? "—"}
+                      </td>
+                      <td className="num px-4 py-2.5">
+                        <span className={`font-medium ${confidenceColor(s.confidence)}`}>
+                          {Math.round(s.confidence * 100)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-text-muted whitespace-nowrap">
+                        {s.model_used?.includes("haiku") ? "Haiku" : s.model_used?.includes("sonnet") ? "Sonnet" : s.model_used?.includes("opus") ? "Opus" : s.model_used ?? "—"}
+                      </td>
+                      <td className={`num px-4 py-2.5 text-xs font-medium ${outcome.cls}`}>
+                        <span className="flex items-center gap-1">
+                          {outcome.simulated && <FlaskConical size={11} className="text-warning shrink-0" />}
+                          {outcome.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Link
+                          href={`/signals/${s.id}`}
+                          className="flex items-center gap-1 text-xs text-primary hover:opacity-80"
+                        >
+                          Inspect <ArrowRight size={11} />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
-      </Section>
-
-      {/* Trades */}
-      <Section title="Trades" count={(trades ?? []).length}>
-        {(trades ?? []).length === 0 ? (
-          <Empty message="No trades placed yet." />
-        ) : (
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  {["Time", "Symbol", "Status", "Volume", "Entry", "SL"].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(trades as TradeRow[]).map((t) => (
-                  <tr key={t.id} className="border-b border-border last:border-0 hover:bg-surface-elevated">
-                    <td className="px-4 py-2.5 text-xs text-text-muted whitespace-nowrap">
-                      <Ts value={t.created_at} />
-                    </td>
-                    <td className="num px-4 py-2.5 font-medium text-text-primary">{t.symbol}</td>
-                    <td className="px-4 py-2.5">
-                      <TradeStatusPill status={t.status} />
-                    </td>
-                    <td className="num px-4 py-2.5 text-text-secondary">{t.volume ?? "—"}</td>
-                    <td className="num px-4 py-2.5 text-text-secondary">{t.entry_price ?? "—"}</td>
-                    <td className="num px-4 py-2.5 text-text-secondary">{t.sl_price ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
-
-      {/* Audit log */}
-      <Section title="Audit Log" count={(auditEvents ?? []).length}>
-        {(auditEvents ?? []).length === 0 ? (
-          <Empty message="No audit events yet." />
-        ) : (
-          <div className="card divide-y divide-border">
-            {(auditEvents as AuditEventRow[]).map((e) => (
-              <div key={e.id} className="flex items-start gap-3 px-4 py-3">
-                <AuditTypePill type={e.event_type} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-muted truncate">
-                    {e.payload ? JSON.stringify(e.payload).slice(0, 120) : "—"}
-                  </p>
-                </div>
-                <p className="text-xs text-text-muted whitespace-nowrap shrink-0">
-                  <Ts value={e.created_at} />
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
+        </div>
+      )}
     </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  children,
-}: {
-  title: string;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
-        <span className="rounded-full bg-surface-elevated px-2 py-0.5 text-xs text-text-muted">
-          {count}
-        </span>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Empty({ message }: { message: string }) {
-  return (
-    <div className="card p-8 text-center">
-      <p className="text-sm text-text-muted">{message}</p>
-    </div>
-  );
-}
-
-function Ts({ value }: { value: string }) {
-  const d = new Date(value);
-  return (
-    <span title={d.toISOString()}>
-      {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}{" "}
-      <span className="text-text-muted">
-        {d.toLocaleDateString([], { month: "short", day: "numeric" })}
-      </span>
-    </span>
-  );
-}
-
-function ConfidenceBadge({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const color = pct >= 85 ? "text-profit" : pct >= 70 ? "text-warning" : "text-loss";
-  return <span className={`font-medium ${color}`}>{pct}%</span>;
-}
-
-function SideBadge({ side }: { side: string | null }) {
-  if (!side) return <span className="text-text-muted">—</span>;
-  const color = side === "BUY" ? "text-profit" : side === "SELL" ? "text-loss" : "text-text-muted";
-  return <span className={`text-xs font-semibold ${color}`}>{side}</span>;
-}
-
-function TradeStatusPill({ status }: { status: string }) {
-  const map: Record<string, { pill: string; dot: string }> = {
-    OPEN:      { pill: "pill-connected", dot: "bg-profit" },
-    PENDING:   { pill: "pill-paused",    dot: "bg-warning" },
-    CLOSED:    { pill: "pill-error",     dot: "bg-text-muted" },
-    CANCELLED: { pill: "pill-error",     dot: "bg-text-muted" },
-    SKIPPED:   { pill: "pill-paused",    dot: "bg-text-muted" },
-    ERROR:     { pill: "pill-error",     dot: "bg-loss" },
-  };
-  const style = map[status] ?? { pill: "pill-paused", dot: "bg-text-muted" };
-  return (
-    <span className={`pill ${style.pill}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-      {status}
-    </span>
-  );
-}
-
-function AuditTypePill({ type }: { type: string }) {
-  const colors: Record<string, string> = {
-    received: "text-text-secondary bg-surface-elevated",
-    parsed:   "text-primary bg-teal-900/20",
-    executed: "text-profit bg-green-900/20",
-    skipped:  "text-warning bg-amber-900/20",
-    error:    "text-loss bg-red-900/20",
-    cancelled:"text-text-muted bg-surface-elevated",
-    modified: "text-primary bg-teal-900/20",
-  };
-  const cls = colors[type] ?? "text-text-secondary bg-surface-elevated";
-  return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {type}
-    </span>
   );
 }

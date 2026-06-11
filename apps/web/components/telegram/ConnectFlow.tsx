@@ -30,6 +30,8 @@ interface ConnectFlowProps {
   initialStatus: SessionStatus;
   /** ISO string of last connection, or null */
   lastConnectedAt: string | null;
+  /** Called when the connection becomes active (for wizard step advancement) */
+  onStatusChange?: (status: string) => void;
 }
 
 // ─── Connected state ──────────────────────────────────────────────────────────
@@ -397,7 +399,7 @@ function QrFlow({ onSuccess }: { onSuccess: () => void }) {
 
 // ─── Root ConnectFlow component ───────────────────────────────────────────────
 
-export default function ConnectFlow({ initialStatus, lastConnectedAt }: ConnectFlowProps) {
+export default function ConnectFlow({ initialStatus, lastConnectedAt, onStatusChange }: ConnectFlowProps) {
   const [status, setStatus] = useState<SessionStatus>(initialStatus);
   const [last, setLast] = useState<string | null>(lastConnectedAt);
   const [method, setMethod] = useState<Method>("phone");
@@ -407,6 +409,7 @@ export default function ConnectFlow({ initialStatus, lastConnectedAt }: ConnectF
     setStatus("active");
     setLast(new Date().toISOString());
     setShowing(false);
+    onStatusChange?.("active");
   }
 
   function handleDisconnect() {

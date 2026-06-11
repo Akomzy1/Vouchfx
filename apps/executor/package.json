@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
+    "@sentry/node": "^10.57.0",
     "@vouchfx/config": "workspace:*",
     "@vouchfx/core": "workspace:*",
     "@vouchfx/db": "workspace:*",

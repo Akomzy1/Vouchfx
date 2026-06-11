@@ -6,8 +6,11 @@ import type { Metadata } from "next";
 import BrokerConnections, {
   type BrokerConnectionRow,
 } from "@/components/broker/BrokerConnections";
+import NotificationPreferences from "@/components/notifications/NotificationPreferences";
+import { NOTIFY_EVENTS } from "@vouchfx/core";
 
 export const metadata: Metadata = { title: "Settings" };
+export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -15,11 +18,30 @@ export default async function SettingsPage() {
   if (!user) redirect("/login");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: brokerConnections } = await (supabase as any)
-    .from("broker_connections")
-    .select("id, label, platform, is_active, status, server_hint, last_status_at, created_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const db = supabase as any;
+
+  const [{ data: brokerConnections }, { data: notifPrefs }] = await Promise.all([
+    db
+      .from("broker_connections")
+      .select("id, label, platform, is_active, status, server_hint, last_status_at, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+    db
+      .from("notification_preferences")
+      .select("event_type, email_enabled, in_app_enabled")
+      .eq("user_id", user.id),
+  ]);
+
+  // Build full preferences list (defaults for missing rows)
+  const rowMap = new Map(
+    ((notifPrefs ?? []) as { event_type: string; email_enabled: boolean; in_app_enabled: boolean }[])
+      .map((r) => [r.event_type, r])
+  );
+  const initialPrefs = NOTIFY_EVENTS.map((event) => ({
+    event_type:    event as typeof NOTIFY_EVENTS[number],
+    email_enabled:  rowMap.get(event)?.email_enabled  ?? true,
+    in_app_enabled: rowMap.get(event)?.in_app_enabled ?? true,
+  }));
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -84,6 +106,17 @@ export default async function SettingsPage() {
             initialConnections={(brokerConnections ?? []) as BrokerConnectionRow[]}
           />
         </div>
+      </div>
+
+      {/* Notifications */}
+      <div className="card divide-y divide-border">
+        <div className="px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-text-secondary mb-0.5">
+            Notifications
+          </p>
+          <p className="text-xs text-text-muted">Choose which events trigger alerts.</p>
+        </div>
+        <NotificationPreferences initial={initialPrefs} />
       </div>
 
       {/* Danger zone */}

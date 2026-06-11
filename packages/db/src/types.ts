@@ -35,6 +35,15 @@ export type ReferralStatus    = "pending" | "converted" | "churned";
 export type PayoutMethod      = "stripe" | "paystack" | "bank_transfer";
 export type PayoutStatus      = "pending" | "processing" | "paid" | "failed";
 
+// ── Phase 2 — Prop Mode ───────────────────────────────────────────────────────
+export type UserRole          = "rule_approver";
+export type DailyLossBasis    = "equity" | "balance";
+export type DrawdownModel     = "static" | "eod_trailing" | "intraday_trailing";
+export type PropRulesetStatus = "draft" | "pending_approval" | "published" | "rejected" | "rolled_back";
+export type PropRuleAuditAction =
+  | "agent_proposal" | "approved" | "rejected" | "auto_published"
+  | "published" | "rolled_back" | "rollback_applied";
+
 // ── Table row types ───────────────────────────────────────────────────────────
 
 export interface UserRow {
@@ -43,6 +52,10 @@ export interface UserRow {
   full_name: string | null;
   avatar_url: string | null;
   referral_code: string | null;
+  stripe_customer_id: string | null;
+  paystack_customer_code: string | null;
+  onboarding_completed_at: string | null;
+  demo_mode_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +67,9 @@ export interface BrokerConnectionRow {
   platform: Platform;
   label: string | null;
   is_active: boolean;
+  last_balance_usd: number | null;
+  last_equity_usd: number | null;
+  last_synced_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +81,7 @@ export interface SignalSourceRow {
   title: string | null;
   is_enabled: boolean;
   daily_signal_limit: number | null;
+  demo_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -107,6 +124,8 @@ export interface TradeRow {
   tp: number | null;
   status: TradeStatus;
   skip_reason: string | null;
+  breakeven_applied: boolean;
+  is_simulated: boolean;
   opened_at: string | null;
   closed_at: string | null;
   created_at: string;
@@ -189,6 +208,7 @@ export interface ReferralRow {
   referral_code: string;
   status: ReferralStatus;
   first_paid_at: string | null;
+  first_month_discount_applied: boolean;
   created_at: string;
 }
 
@@ -220,6 +240,116 @@ export interface PayoutRow {
   created_at: string;
   updated_at: string;
 }
+
+export interface NotificationPreferenceRow {
+  id: string;
+  user_id: string;
+  event_type: string;
+  email_enabled: boolean;
+  in_app_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationRow {
+  id: string;
+  user_id: string;
+  event_type: string;
+  title: string;
+  body: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+// ── Phase 2 row types ─────────────────────────────────────────────────────────
+
+export interface UserRoleRow {
+  user_id: string;
+  role: UserRole;
+  granted_by: string;
+  granted_at: string;
+}
+
+export interface PropFirmRow {
+  id: string;
+  name: string;
+  slug: string;
+  website_url: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface PropRulesetRow {
+  id: string;
+  firm_id: string;
+  challenge_name: string;
+  version: number;
+  status: PropRulesetStatus;
+  is_current: boolean;
+  daily_loss_pct: number;
+  daily_loss_basis: DailyLossBasis;
+  max_drawdown_pct: number;
+  max_drawdown_model: DrawdownModel;
+  consistency_pct: number | null;
+  news_before_min: number;
+  news_after_min: number;
+  weekend_holding_allowed: boolean;
+  min_trading_days: number;
+  copy_trading_permitted: boolean;
+  source_url: string | null;
+  verified_at: string | null;
+  published_by: string | null;
+  published_at: string | null;
+  agent_confidence: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface PropAccountProfileRow {
+  id: string;
+  user_id: string;
+  broker_connection_id: string;
+  ruleset_id: string;
+  enabled: boolean;
+  stealth_config: Json | null;
+  challenge_start_balance_usd: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PropRuleAuditRow {
+  id: string;
+  firm_id: string;
+  ruleset_id: string | null;
+  proposal_id: string | null;
+  action: PropRuleAuditAction;
+  actor: string;
+  old_values: Json | null;
+  new_values: Json | null;
+  source_url: string | null;
+  agent_confidence: number | null;
+  created_at: string;
+}
+
+// ── Phase 2 insert types ──────────────────────────────────────────────────────
+
+export type UserRoleInsert = UserRoleRow;
+
+export type PropFirmInsert =
+  Pick<PropFirmRow, "name" | "slug"> &
+  Partial<Pick<PropFirmRow, "id" | "website_url" | "active">>;
+
+export type PropRulesetInsert =
+  Pick<PropRulesetRow, "firm_id" | "challenge_name" | "daily_loss_pct" | "max_drawdown_pct"> &
+  Partial<Omit<PropRulesetRow, "firm_id" | "challenge_name" | "daily_loss_pct" | "max_drawdown_pct" | "id" | "created_at">>;
+
+export type PropAccountProfileInsert =
+  Pick<PropAccountProfileRow, "user_id" | "broker_connection_id" | "ruleset_id"> &
+  Partial<Pick<PropAccountProfileRow, "id" | "enabled" | "stealth_config" | "challenge_start_balance_usd">>;
+
+export type PropRuleAuditInsert =
+  Pick<PropRuleAuditRow, "firm_id" | "action" | "actor"> &
+  Partial<Pick<PropRuleAuditRow, "id" | "ruleset_id" | "old_values" | "new_values" | "source_url" | "agent_confidence">>;
 
 // ── Insert types (required fields only; optional fields nullable/defaulted) ───
 
@@ -344,6 +474,31 @@ export interface Database {
         Row: PayoutRow;
         Insert: PayoutInsert;
         Update: Partial<PayoutInsert>;
+      } & NoRelationships;
+      user_roles: {
+        Row: UserRoleRow;
+        Insert: UserRoleInsert;
+        Update: Partial<UserRoleInsert>;
+      } & NoRelationships;
+      prop_firms: {
+        Row: PropFirmRow;
+        Insert: PropFirmInsert;
+        Update: Partial<PropFirmInsert>;
+      } & NoRelationships;
+      prop_rulesets: {
+        Row: PropRulesetRow;
+        Insert: PropRulesetInsert;
+        Update: Partial<PropRulesetInsert>;
+      } & NoRelationships;
+      prop_account_profiles: {
+        Row: PropAccountProfileRow;
+        Insert: PropAccountProfileInsert;
+        Update: Partial<PropAccountProfileInsert>;
+      } & NoRelationships;
+      prop_rule_audit: {
+        Row: PropRuleAuditRow;
+        Insert: PropRuleAuditInsert;
+        Update: Partial<PropRuleAuditInsert>;
       } & NoRelationships;
     };
     Views: Record<string, never>;

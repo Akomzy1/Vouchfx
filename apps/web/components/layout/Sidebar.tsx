@@ -7,6 +7,7 @@ import {
   Radio,
   Activity,
   Shield,
+  Target,
   CreditCard,
   Gift,
   Settings,
@@ -18,8 +19,9 @@ const NAV = [
   { href: "/channels", label: "Channels", icon: Radio },
   { href: "/signals", label: "Signals", icon: Activity },
   { href: "/risk", label: "Risk", icon: Shield },
+  { href: "/prop", label: "Prop Mode", icon: Target },
   { href: "/billing", label: "Billing", icon: CreditCard },
-  { href: "/referrals", label: "Refer & Earn", icon: Gift },
+  { href: "/refer", label: "Refer & Earn", icon: Gift },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

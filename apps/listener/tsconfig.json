@@ -8,7 +8,8 @@
     "outDir": "dist",
     "paths": {
       "@vouchfx/config": ["../../packages/config/src/index.ts"],
-      "@vouchfx/core": ["../../packages/core/src/index.ts"]
+      "@vouchfx/core": ["../../packages/core/src/index.ts"],
+      "@vouchfx/db": ["../../packages/db/src/index.ts"]
     }
   },
   "include": ["src/**/*"]

@@ -18,16 +18,25 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { CONFIDENCE_THRESHOLD, MODELS } from "@vouchfx/config";
+import { CONFIDENCE_THRESHOLD, MODELS, env } from "@vouchfx/config";
 import {
   parseSignalWithEscalation,
   MetaApiExecutor,
+  gateAndSize,
+  DEFAULT_RISK_SETTINGS,
+  notify,
+  canExecute,
+  getEntitlements,
   type BrokerConnection,
   type OrderRequest,
   type TradeRef,
   type SignalJobData,
   type ParsedSignal,
   type PriorSignalContext,
+  type RiskSettings,
+  type SlUnit,
+  type Plan,
+  type SubscriptionStatus,
 } from "@vouchfx/core";
 import {
   writeAuditEvent,
@@ -37,8 +46,42 @@ import {
   type TradeRow,
 } from "@vouchfx/db";
 
-/** Spike: fixed lot size per leg. Risk engine (P1.14) supplies the real volume. */
-const SPIKE_LEG_VOLUME = 0.01;
+/** Map DB risk_settings row to the risk engine's RiskSettings shape. */
+function dbRowToRiskSettings(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  row: Record<string, any>
+): RiskSettings {
+  const modeMap: Record<string, RiskSettings["mode"]> = {
+    percent_balance: "percent_balance",
+    fixed_lot: "fixed_lot",
+    fixed_usd_risk: "fixed_dollar_risk",
+  };
+  const mirrorLotMap: Record<string, RiskSettings["mirrorLotMode"]> = {
+    provider_lot: "provider_lot",
+    fixed_lot: "fixed_lot",
+    risk_based: "risk_based",
+  };
+  return {
+    mode: modeMap[row.sizing_mode as string] ?? "percent_balance",
+    riskPercent: Number(row.risk_per_trade_pct ?? 0.5),
+    fixedLot: Number(row.fixed_lot_size ?? DEFAULT_RISK_SETTINGS.fixedLot),
+    fixedDollarRisk: Number(row.fixed_usd_risk ?? DEFAULT_RISK_SETTINGS.fixedDollarRisk),
+    defaultSlPips: Number(row.default_sl_pips ?? DEFAULT_RISK_SETTINGS.defaultSlPips),
+    defaultSlPolicy: (row.default_sl_policy as RiskSettings["defaultSlPolicy"]) ?? "skip",
+    maxTrades: 0,
+    maxTradesPerDay: Number(row.max_trades_per_day ?? 0),
+    dailySignalLimit: Number(row.daily_signal_limit ?? 0),
+    dailyLossCapPercent: Number(row.daily_loss_cap_pct ?? 0),
+    dailyLossCapAction: (row.daily_loss_cap_action as RiskSettings["dailyLossCapAction"]) ?? "pause",
+    breakevenAfterTp1: Boolean(row.breakeven_after_tp1 ?? false),
+    trailingAfterTp2: Boolean(row.trailing_after_tp2 ?? false),
+    executionMode: row.execution_mode === "mirror_provider" ? "mirror_provider" : "apply_my_rules",
+    mirrorLotMode: mirrorLotMap[row.mirror_lot_mode as string] ?? "risk_based",
+    mirrorAllowNoSl: Boolean(row.mirror_allow_no_sl ?? false),
+    newsFilterEnabled: Boolean(row.news_filter_enabled ?? false),
+    newsFilterWindowMin: Number(row.news_filter_window_min ?? 60),
+  };
+}
 
 const QUEUE_NAME = "vouchfx:signals";
 
@@ -134,6 +177,191 @@ async function lookupBrokerConn(
 
   const platform = ((data as { platform: string }).platform ?? "MT5") as "MT5" | "MT4";
   return { metaApiAccountId, platform };
+}
+
+/**
+ * Fire-and-forget notification helper.
+ * Fetches the user's email then calls notify(). Errors are silently swallowed
+ * so notification failures never block the execution path.
+ */
+function notifyAsync(
+  db: TypedClient,
+  userId: string,
+  event: Parameters<typeof notify>[1]["event"],
+  title: string,
+  body?: string
+): void {
+  Promise.resolve()
+    .then(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: userRow } = await (db as any)
+        .from("users")
+        .select("email")
+        .eq("id", userId)
+        .maybeSingle();
+      await notify(db as Parameters<typeof notify>[0], {
+        userId,
+        toEmail: (userRow as { email?: string } | null)?.email ?? null,
+        event,
+        title,
+        body,
+        resendApiKey: env.RESEND_API_KEY ?? null,
+      });
+    })
+    .catch(() => undefined);
+}
+
+/** Write the latest balance/equity to broker_connections for the web dashboard. */
+async function cacheBalanceInDb(
+  db: TypedClient,
+  brokerConnectionId: string,
+  balance: number,
+  equity: number
+): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db as any)
+      .from("broker_connections")
+      .update({
+        last_balance_usd: balance,
+        last_equity_usd: equity,
+        last_synced_at: new Date().toISOString(),
+      })
+      .eq("id", brokerConnectionId);
+  } catch {
+    // Non-critical — dashboard will show stale data until next sync
+  }
+}
+
+// ── Plan gate (trial enforcement) ────────────────────────────────────────────
+
+/**
+ * Checks the user's active subscription:
+ *   - If trial has expired in the DB (trial_ends_at < now), marks it expired.
+ *   - Blocks execution when canExecute() returns false.
+ *   - Returns the plan's maxSignalsPerDay cap (0 = unlimited) for downstream use.
+ *
+ * For NEW users with no subscription row (race condition before the trigger fires),
+ * we treat them as an active trial.
+ */
+async function checkPlanGate(
+  db: TypedClient,
+  userId: string
+): Promise<{ ok: true; planSignalCap: number } | { ok: false; reason: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: subRow } = await (db as any)
+    .from("subscriptions")
+    .select("id, plan, status, trial_ends_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // No subscription row yet — treat as fresh trial (trigger may not have fired)
+  if (!subRow) {
+    return { ok: true, planSignalCap: 1 }; // trial-equivalent cap
+  }
+
+  const sub = subRow as { id: string; plan: string; status: string; trial_ends_at: string | null };
+
+  // Inline trial expiry: if trialing but trial_ends_at is in the past, expire it now
+  if (sub.status === "trialing" && sub.trial_ends_at && new Date(sub.trial_ends_at) < new Date()) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db as any).from("subscriptions").update({ status: "expired" }).eq("id", sub.id);
+    sub.status = "expired";
+  }
+
+  const plan = (sub.plan ?? "trial") as Plan;
+  const status = sub.status as SubscriptionStatus;
+
+  if (!canExecute(plan, status)) {
+    return {
+      ok: false,
+      reason: `plan_gate:plan=${plan} status=${status}`,
+    };
+  }
+
+  const { maxSignalsPerDay } = getEntitlements(plan);
+  return { ok: true, planSignalCap: maxSignalsPerDay };
+}
+
+// ── Daily limits gate ─────────────────────────────────────────────────────────
+
+/**
+ * Check daily signal + trade-leg caps before execution.
+ *
+ * Semantics:
+ *   - Signal count: 1 per NEW_SIGNAL acted on (distinct parsed_signal_id in trades today).
+ *     Multi-TP signals still count as 1 signal regardless of how many legs they spawn.
+ *   - Trade count: 1 per leg inserted today (volume of broker activity).
+ *   - Per-channel limit: sourced from signal_sources.daily_signal_limit; null = inherit global.
+ *   - Day boundary: midnight UTC.
+ *   - 0 = unlimited for every cap.
+ */
+async function checkDailyLimits(
+  db: TypedClient,
+  userId: string,
+  sourceId: string,
+  riskSettings: RiskSettings
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayStartISO = todayStart.toISOString();
+
+  // Fetch today's non-skipped trade legs for this user (id + parsed_signal_id only).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: todayTrades } = await (db as any)
+    .from("trades")
+    .select("id, parsed_signal_id")
+    .eq("user_id", userId)
+    .gte("created_at", todayStartISO)
+    .neq("status", "SKIPPED");
+
+  const tradeRows = (todayTrades ?? []) as { id: string; parsed_signal_id: string }[];
+  const tradeLegCount = tradeRows.length;
+  const globalSignalCount = new Set(tradeRows.map((r) => r.parsed_signal_id)).size;
+
+  // Max trade legs per day
+  if (riskSettings.maxTradesPerDay > 0 && tradeLegCount >= riskSettings.maxTradesPerDay) {
+    return { ok: false, reason: `max_trades_per_day:${tradeLegCount}/${riskSettings.maxTradesPerDay}` };
+  }
+
+  // Global daily signal limit
+  if (riskSettings.dailySignalLimit > 0 && globalSignalCount >= riskSettings.dailySignalLimit) {
+    return { ok: false, reason: `daily_signal_limit:${globalSignalCount}/${riskSettings.dailySignalLimit}` };
+  }
+
+  // Per-channel daily signal limit (only when the channel has its own override)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sourceRow } = await (db as any)
+    .from("signal_sources")
+    .select("daily_signal_limit")
+    .eq("id", sourceId)
+    .maybeSingle();
+
+  const channelLimit: number = (sourceRow as { daily_signal_limit: number | null } | null)
+    ?.daily_signal_limit ?? 0;
+
+  if (channelLimit > 0) {
+    const allActedPsIds = [...new Set(tradeRows.map((r) => r.parsed_signal_id))];
+    let channelSignalCount = 0;
+
+    if (allActedPsIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: channelPs } = await (db as any)
+        .from("parsed_signals")
+        .select("id")
+        .eq("source_id", sourceId)
+        .in("id", allActedPsIds);
+      channelSignalCount = (channelPs ?? []).length;
+    }
+
+    if (channelSignalCount >= channelLimit) {
+      return { ok: false, reason: `channel_daily_signal_limit:${channelSignalCount}/${channelLimit}` };
+    }
+  }
+
+  return { ok: true };
 }
 
 // ── Follow-up dispatch ────────────────────────────────────────────────────────
@@ -284,6 +512,218 @@ async function dispatchFollowUp(
   }
 }
 
+// ── Drawdown guardian ────────────────────────────────────────────────────────
+
+/** Close every PENDING/OPEN VouchFX-managed trade for this user. */
+async function closeAllUserTrades(
+  db: TypedClient,
+  executor: MetaApiExecutor,
+  userId: string,
+  brokerConn: BrokerConnection,
+  tag: string,
+  parsedSignalId: string
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from("trades")
+    .select("id, broker_order_id, status")
+    .eq("user_id", userId)
+    .in("status", ["PENDING", "OPEN"]);
+
+  const trades = (data ?? []) as TradeRow[];
+  let closedCount = 0;
+
+  for (const trade of trades) {
+    if (!trade.broker_order_id) continue;
+    const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id };
+    try {
+      if (trade.status === "PENDING") {
+        await executor.cancelPending(ref);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db as any).from("trades").update({ status: "CANCELLED" }).eq("id", trade.id);
+      } else {
+        await executor.closePosition(ref);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db as any).from("trades").update({ status: "CLOSED", closed_at: new Date().toISOString() }).eq("id", trade.id);
+      }
+      closedCount++;
+    } catch (err) {
+      console.error(`${tag} close-all: failed to close ${shortId(trade.id)}:`, (err as Error).message);
+    }
+  }
+
+  await writeAuditEvent(db, {
+    userId,
+    eventType: "closed",
+    parsedSignalId,
+    payload: { reason: "drawdown_cap_close_all", closed: closedCount },
+  });
+
+  console.log(`${tag} drawdown close-all: ${closedCount} position(s) closed`);
+}
+
+/**
+ * Daily loss cap gate (VCH-RSK-03).
+ *
+ * daily loss = -(todayRealizedPnl + floatingPnl)
+ * drawdown % = daily loss / opening balance * 100
+ *   where opening balance = current balance − today's realized P&L
+ *
+ * If the cap is hit:
+ *   - "pause"           → block this and all subsequent executions today.
+ *   - "pause_and_close" → also close every open VouchFX trade.
+ */
+async function checkDrawdown(
+  db: TypedClient,
+  executor: MetaApiExecutor,
+  userId: string,
+  brokerConn: BrokerConnection,
+  riskSettings: RiskSettings,
+  tag: string,
+  parsedSignalId: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (riskSettings.dailyLossCapPercent <= 0) return { ok: true };
+
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [{ balance, equity }, realizedPnl] = await Promise.all([
+    executor.getAccountInfo(brokerConn),
+    executor.getTodayRealizedPnl(brokerConn, todayStart),
+  ]);
+
+  const floatingPnl = equity - balance;
+  const totalTodayPnl = realizedPnl + floatingPnl;
+
+  if (totalTodayPnl >= 0) return { ok: true };
+
+  const openingBalance = balance - realizedPnl;
+  if (openingBalance <= 0) return { ok: true }; // guard against invalid state
+
+  const drawdownPct = (-totalTodayPnl / openingBalance) * 100;
+
+  if (drawdownPct < riskSettings.dailyLossCapPercent) return { ok: true };
+
+  const reason = `drawdown_cap:${drawdownPct.toFixed(1)}%_vs_${riskSettings.dailyLossCapPercent}%`;
+  console.log(`${tag} ${reason}`);
+
+  if (riskSettings.dailyLossCapAction === "pause_and_close") {
+    await closeAllUserTrades(db, executor, userId, brokerConn, tag, parsedSignalId);
+  }
+
+  await writeAuditEvent(db, {
+    userId,
+    eventType: "skipped",
+    parsedSignalId,
+    payload: {
+      reason,
+      drawdown_pct: drawdownPct,
+      cap_pct: riskSettings.dailyLossCapPercent,
+      today_pnl: totalTodayPnl,
+      balance,
+      equity,
+    },
+  });
+
+  notifyAsync(
+    db, userId, "daily_loss_cap_hit",
+    "Daily loss cap reached",
+    `Drawdown ${drawdownPct.toFixed(1)}% hit your ${riskSettings.dailyLossCapPercent}% cap. New signals paused for today.`
+  );
+
+  return { ok: false, reason };
+}
+
+// ── Breakeven-after-TP1 ───────────────────────────────────────────────────────
+
+/**
+ * For every OPEN leg whose signal already has at least one CLOSED sibling leg
+ * (TP1 hit), move the SL to entry_price and mark breakeven_applied = true.
+ *
+ * Runs at the start of each new-signal execution so breakeven is applied
+ * promptly without a separate monitoring loop. Only acts when
+ * riskSettings.breakevenAfterTp1 is true (VCH-RSK-05).
+ */
+async function applyBreakevenOpportunities(
+  db: TypedClient,
+  executor: MetaApiExecutor,
+  userId: string,
+  brokerConn: BrokerConnection,
+  riskSettings: RiskSettings,
+  tag: string
+): Promise<void> {
+  if (!riskSettings.breakevenAfterTp1) return;
+
+  // Fetch OPEN legs where breakeven has not yet been applied and we have
+  // both a broker order ID and an entry price to move SL to.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from("trades")
+    .select("id, parsed_signal_id, broker_order_id, entry_price, sl")
+    .eq("user_id", userId)
+    .eq("status", "OPEN")
+    .eq("breakeven_applied", false)
+    .not("entry_price", "is", null)
+    .not("broker_order_id", "is", null);
+
+  const openLegs = (data ?? []) as Array<{
+    id: string;
+    parsed_signal_id: string;
+    broker_order_id: string;
+    entry_price: number;
+    sl: number | null;
+  }>;
+
+  if (openLegs.length === 0) return;
+
+  // Group by signal so we check closed-sibling existence once per signal.
+  const bySignal = new Map<string, typeof openLegs>();
+  for (const leg of openLegs) {
+    const arr = bySignal.get(leg.parsed_signal_id) ?? [];
+    arr.push(leg);
+    bySignal.set(leg.parsed_signal_id, arr);
+  }
+
+  for (const [signalId, legs] of bySignal) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count: closedCount } = await (db as any)
+      .from("trades")
+      .select("*", { count: "exact", head: true })
+      .eq("parsed_signal_id", signalId)
+      .eq("status", "CLOSED");
+
+    if (!closedCount || closedCount === 0) continue; // TP1 not yet hit
+
+    for (const leg of legs) {
+      const ref: TradeRef = { connectionId: brokerConn.id, brokerId: leg.broker_order_id };
+      try {
+        await executor.modifyOrder(ref, { sl: leg.entry_price });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db as any)
+          .from("trades")
+          .update({ sl: leg.entry_price, breakeven_applied: true })
+          .eq("id", leg.id);
+
+        await writeAuditEvent(db, {
+          userId,
+          eventType: "modified",
+          payload: {
+            action: "breakeven_applied",
+            trade_id: leg.id,
+            signal_id: signalId,
+            entry_price: leg.entry_price,
+            prev_sl: leg.sl,
+          },
+        });
+
+        console.log(`${tag} breakeven: trade=${shortId(leg.id)} sl→${leg.entry_price}`);
+      } catch (err) {
+        console.error(`${tag} breakeven failed for trade ${shortId(leg.id)}:`, (err as Error).message);
+      }
+    }
+  }
+}
+
 // ── New-signal execution (multi-TP) ──────────────────────────────────────────
 
 async function executeNewSignal(
@@ -295,7 +735,10 @@ async function executeNewSignal(
   parsedSignalId: string,
   userId: string,
   brokerConnectionId: string,
-  idempotencyKey: string
+  sourceId: string,
+  idempotencyKey: string,
+  planSignalCap: number,  // 0 = unlimited; plan-level override for trial cap
+  isDemoMode: boolean     // channel is in demo/paper mode
 ): Promise<void> {
   if (!parsed.symbol || !parsed.side) {
     console.log(`${tag} skipped: symbol or side missing`);
@@ -317,6 +760,44 @@ async function executeNewSignal(
     return;
   }
 
+  // ── Risk settings + daily limits gate ───────────────────────────────────
+  // DB reads happen before any broker network calls to fail-fast cheaply.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rsRow } = await (db as any)
+    .from("risk_settings")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const riskSettings: RiskSettings = rsRow
+    ? dbRowToRiskSettings(rsRow as Record<string, unknown>)
+    : DEFAULT_RISK_SETTINGS;
+
+  // Plan-level signal cap: trial = 1/day (system-locked, cannot be overridden by user settings)
+  if (planSignalCap > 0) {
+    if (riskSettings.dailySignalLimit === 0 || planSignalCap < riskSettings.dailySignalLimit) {
+      riskSettings.dailySignalLimit = planSignalCap;
+    }
+  }
+
+  const limitsResult = await checkDailyLimits(db, userId, sourceId, riskSettings);
+  if (!limitsResult.ok) {
+    console.log(`${tag} skipped by daily limits: ${limitsResult.reason}`);
+    await writeAuditEvent(db, {
+      userId,
+      eventType: "skipped",
+      parsedSignalId,
+      payload: { reason: `daily_limits:${limitsResult.reason}` },
+    });
+    return;
+  }
+
+  // ── Drawdown guardian ────────────────────────────────────────────────────
+  const drawdownResult = await checkDrawdown(db, executor, userId, brokerConn, riskSettings, tag, parsedSignalId);
+  if (!drawdownResult.ok) {
+    return; // audit event already written inside checkDrawdown
+  }
+
   // ── Resolve broker symbol ────────────────────────────────────────────────
   const resolvedSymbol = await executor.resolveSymbol(parsed.symbol, brokerConn);
   if (!resolvedSymbol) {
@@ -327,7 +808,6 @@ async function executeNewSignal(
   }
 
   // ── Resolve order type and entry price ──────────────────────────────────
-  // Use the parser's order_type; fall back to MARKET if LIMIT/STOP has no entry.
   const parsedOrderType = parsed.order_type ?? "MARKET";
   const entryPrice: number | undefined = parsed.entries[0];
   const orderType: "MARKET" | "LIMIT" | "STOP" =
@@ -335,27 +815,73 @@ async function executeNewSignal(
       ? (console.warn(`${tag} ${parsedOrderType} order has no entry price — falling back to MARKET`), "MARKET")
       : (parsedOrderType as "MARKET" | "LIMIT" | "STOP");
 
+  const [{ balance: accountBalance, equity: accountEquity }, symbolSpec] = await Promise.all([
+    executor.getAccountInfo(brokerConn),
+    executor.getSymbolSpec(resolvedSymbol, brokerConn),
+  ]);
+
+  // Write balance to broker_connections so the web dashboard can display it
+  // without making MetaApi calls from the Vercel serverless environment.
+  await cacheBalanceInDb(db, brokerConnectionId, accountBalance, accountEquity);
+
+  // For MARKET orders the entry price is unknown until fill; use first parsed
+  // entry if available, otherwise use the symbol's tick size as a safe proxy
+  // for computing SL distance (will be slightly imprecise but conservative).
+  const gatePriceRef = entryPrice ?? accountBalance; // fallback: any positive finite
+  const slUnit: SlUnit = (parsed.sl_unit as SlUnit | null) ?? "price";
+
+  const gateResult = gateAndSize({
+    sl: parsed.sl,
+    slUnit,
+    entryPrice: gatePriceRef,
+    accountBalance,
+    settings: riskSettings,
+    spec: symbolSpec,
+    providerLot: parsed.provider_lot ?? null,
+  });
+
+  if (!gateResult.ok) {
+    console.log(`${tag} skipped by risk engine: ${gateResult.reason}`);
+    await writeAuditEvent(db, {
+      userId,
+      eventType: "skipped",
+      parsedSignalId,
+      payload: { reason: `risk_gate:${gateResult.reason}`, sl: parsed.sl, sl_unit: parsed.sl_unit },
+    });
+    return;
+  }
+
+  const legVolume = gateResult.volume;
+  console.log(`${tag} risk gate passed: volume=${legVolume} dollarRisk=${gateResult.dollarRisk.toFixed(2)} balance=${accountBalance.toFixed(2)}`);
+
+  // ── Breakeven-after-TP1: apply to any existing eligible open legs ────────
+  await applyBreakevenOpportunities(db, executor, userId, brokerConn, riskSettings, tag);
+
   // ── Build TP legs ────────────────────────────────────────────────────────
-  // Each TP → one trade leg. No TPs → one leg without a TP target.
   const tpLegs: (number | null)[] = parsed.tps.length > 0 ? parsed.tps : [null];
 
-  console.log(`${tag} placing ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}`);
+  const modeLabel = isDemoMode ? "simulating" : "placing";
+  console.log(`${tag} ${modeLabel} ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}${isDemoMode ? " [DEMO]" : ""}`);
+
+  // In demo mode, use the signal's entry price as simulated fill (no live tick needed)
+  const simulatedPrice: number | null = isDemoMode ? (entryPrice ?? null) : null;
 
   for (let i = 0; i < tpLegs.length; i++) {
     const tp = tpLegs[i];
     const legKey = tpLegs.length === 1 ? idempotencyKey : `${idempotencyKey}:leg${i}`;
 
-    // Insert trade row with PENDING status
     const tradeInsert: TradeInsert = {
-      user_id: userId,
-      parsed_signal_id: parsedSignalId,
+      user_id:              userId,
+      parsed_signal_id:     parsedSignalId,
       broker_connection_id: brokerConnectionId,
-      symbol: parsed.symbol,
-      side: parsed.side,
-      volume: SPIKE_LEG_VOLUME, // risk engine (P1.14) will supply real volume
-      sl: parsed.sl ?? undefined,
-      tp: tp ?? undefined,
-      status: "PENDING",
+      symbol:               parsed.symbol,
+      side:                 parsed.side,
+      volume:               legVolume,
+      sl:                   parsed.sl ?? undefined,
+      tp:                   tp ?? undefined,
+      status:               "PENDING",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(isDemoMode ? { is_simulated: true } as any : {}),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -372,18 +898,29 @@ async function executeNewSignal(
     const tradeId = (tradeRows as { id: string }[])[0]!.id;
     console.log(`${tag} leg ${i} trade created (id=${shortId(tradeId)} tp=${tp ?? "none"})`);
 
-    // Place order
+    if (isDemoMode) {
+      // Paper trade — mark OPEN immediately with simulated fill price, no broker call
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from("trades").update({
+        entry_price: simulatedPrice,
+        status:      "OPEN",
+        opened_at:   new Date().toISOString(),
+      }).eq("id", tradeId);
+      console.log(`${tag} leg ${i} simulated: price=${simulatedPrice ?? "unknown"}`);
+      continue;
+    }
+
     const req: OrderRequest = {
       connectionId: brokerConnectionId,
-      symbol: resolvedSymbol,
-      side: parsed.side,
+      symbol:       resolvedSymbol,
+      side:         parsed.side,
       orderType,
-      volume: SPIKE_LEG_VOLUME, // risk engine (P1.14) will supply real volume
+      volume:       legVolume,
       entryPrice,
-      sl: parsed.sl ?? undefined,
-      tp: tp ?? undefined,
+      sl:           parsed.sl ?? undefined,
+      tp:           tp ?? undefined,
       clientOrderId: legKey,
-      comment: "VouchFX",
+      comment:      "VouchFX",
     };
 
     let fillPrice = 0;
@@ -414,7 +951,6 @@ async function executeNewSignal(
     }
   }
 
-  // Audit the overall execution
   await writeAuditEvent(db, {
     userId,
     eventType: "executed",
@@ -426,8 +962,17 @@ async function executeNewSignal(
       tps: parsed.tps,
       sl: parsed.sl,
       resolved_symbol: resolvedSymbol,
+      volume: legVolume,
+      dollar_risk: gateResult.dollarRisk,
+      account_balance: accountBalance,
     },
   });
+
+  notifyAsync(
+    db, userId, "trade_opened",
+    `${parsed.side} ${parsed.symbol} opened`,
+    `${tpLegs.length} leg${tpLegs.length > 1 ? "s" : ""} · vol ${legVolume} · risk $${gateResult.dollarRisk.toFixed(2)}`
+  );
 }
 
 // ── Pre-classified cancel jobs ────────────────────────────────────────────────
@@ -547,6 +1092,19 @@ async function processJob(
     payload: { idempotency_key: idempotencyKey, message_id: messageId, edit_version: editVersion, raw_text: text.slice(0, 500) },
   });
 
+  // ── 1b. Plan gate ─────────────────────────────────────────────────────────
+  const planGate = await checkPlanGate(db, userId);
+  if (!planGate.ok) {
+    console.log(`${tag} skipped by plan gate: ${planGate.reason}`);
+    await writeAuditEvent(db, {
+      userId,
+      eventType: "skipped",
+      payload: { reason: planGate.reason },
+    });
+    return;
+  }
+  const { planSignalCap } = planGate;
+
   // ── 2. Build prior-signal context for edits ──────────────────────────────
   // For edits (editVersion > 0), look up the original parsed_signals row so
   // the model can classify the change (MODIFY_SL, CANCEL_PENDING, etc.).
@@ -659,8 +1217,14 @@ async function processJob(
     console.log(`${tag} parsed_signal already persisted (id=${shortId(parsedSignalId)})`);
   }
 
-  // ── 7. Broker connection ──────────────────────────────────────────────────
-  const { metaApiAccountId, platform } = await lookupBrokerConn(db, brokerConnectionId);
+  // ── 7. Broker connection + demo mode check ───────────────────────────────
+  const [brokerLookup, sourceResult] = await Promise.all([
+    lookupBrokerConn(db, brokerConnectionId),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).from("signal_sources").select("demo_until").eq("id", sourceId).maybeSingle(),
+  ]);
+
+  const { metaApiAccountId, platform } = brokerLookup;
   const brokerConn: BrokerConnection = {
     id: brokerConnectionId,
     userId,
@@ -669,13 +1233,16 @@ async function processJob(
   };
   executor.register(brokerConn);
 
+  const demoUntil = (sourceResult.data as { demo_until: string | null } | null)?.demo_until ?? null;
+  const isDemoMode = demoUntil !== null && new Date(demoUntil) > new Date();
+
   // ── 8. Route: follow-up or new signal ────────────────────────────────────
   const followUpType = parsed.follow_up_type;
 
   if (followUpType && followUpType !== "NEW_SIGNAL") {
     await dispatchFollowUp(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, sourceId);
   } else {
-    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, idempotencyKey);
+    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, isDemoMode);
   }
 }
 

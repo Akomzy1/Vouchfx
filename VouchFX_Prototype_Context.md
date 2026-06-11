@@ -158,7 +158,10 @@ Skipped → Reason: "No stop loss detected — your default-SL policy is set to 
 | Funded | $79/mo | 10 | Unlimited | Multi-region failover, priority support |
 | Lifetime | $399 one-off | 3 | Unlimited | Pro features, lifetime updates |
 
-Payment: USD via card (Stripe) or naira (Paystack).
+Payment: USD via card (Stripe) or naira (Paystack). Monthly billing only — no annual plans for now (decision; revisit with retention data).
+
+**Official links**
+- Telegram channel: `https://t.me/getvouchfx` (used in landing nav, footer, and community strip; opens in a new tab)
 
 **Referral & affiliate (both programs pay 20%)**
 - User's referral link: `vouchfx.com/r/tunde` · referral code: `TUNDE`
@@ -179,6 +182,12 @@ Payment: USD via card (Stripe) or naira (Paystack).
 - Stealth params: lot variation ±, micro-delay, SL/TP jitter, neutral comments — "avoid copy-group detection across accounts"
 - Restriction banner (example): "This firm restricts copy trading — review their terms before enabling." (amber)
 
+**Rule Monitor (admin — approval queue for the Rule Monitor agent)**
+- Status: agent last ran today 06:00 · 14 firms monitored · 3 changes pending · approver is a fillable role badge
+- Launch criterion: only firms that explicitly permit copy trading / EAs (e.g. FundingPips, The5ers, FXIFY, BrightFunded)
+- Pending items: FundingPips 100K — Daily loss `5% → 4%` (Account-killing, confidence High, approval required); The5ers — news window `2 → 3 min` (Low-stakes, auto-published, Undo available); FXIFY — source unclear, manual review needed (confidence Low)
+- Version history row example: v7 · "Daily loss 5%→4%" · published by Approver · source link · Rollback
+
 ---
 
 ## 7. Screen inventory
@@ -194,6 +203,7 @@ Payment: USD via card (Stripe) or naira (Paystack).
 | Billing & plans | Plan cards, USD (Stripe) / naira (Paystack), checkout summary, invoice history |
 | Refer & earn | Two tabs (Signal providers affiliate / My referrals), both 20%; referral link + QR, earning stats, referrals table, payout panel ($50 min) |
 | Prop Mode (Phase 2) | Per-account firm selector + loaded ruleset; live rule cards (daily loss, drawdown+model, consistency %, news, weekend, min-days) with usage vs limit; equity-guardian gauge; consistency meter; stealth settings; copy-restriction warning |
+| Rule Monitor (Phase 2, admin) | Approval queue of agent-detected rule changes (diff old→new, stakes tag, source link, confidence, Approve/Reject/Edit); auto-published low-stakes items with Undo; version history with rollback |
 
 App navigation: left sidebar (Dashboard, Channels, Signals, Risk, Billing, Refer & earn, Settings; plus Prop Mode for Phase 2) → collapses to bottom nav on mobile. Top bar shows the VouchFX wordmark (teal dot + "VouchFX") and broker/Telegram status pills.
 
@@ -215,6 +225,7 @@ App navigation: left sidebar (Dashboard, Channels, Signals, Risk, Billing, Refer
 - Clear, confident, plain-spoken. Short labels. No hype.
 - Lead with control and transparency: "signals you choose", "see exactly what happened and why".
 - Always include the disclaimer where relevant: *"VouchFX is an execution tool you control. It does not provide financial advice or guarantee outcomes. Trading involves risk."*
+- Approved rule-monitor marketing copy (landing band, Funded plan): headline "Prop firm changed the rules? We already know." — body emphasises "detected, human-verified, and live in your guardrails" and the "last verified" stamp. Never claim instant/unsupervised AI enforcement; the human-verification step is marketed as a trust feature.
 
 ---
 

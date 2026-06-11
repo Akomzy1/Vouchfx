@@ -36,10 +36,8 @@ const config: Config = {
       },
       borderRadius: {
         DEFAULT: "0.75rem",
-        sm: "0.375rem",
-        lg: "1rem",
-        xl: "1rem",
-        "2xl": "1.25rem",
+        sm:   "0.375rem",
+        lg:   "1rem",
         full: "9999px",
       },
       fontSize: {

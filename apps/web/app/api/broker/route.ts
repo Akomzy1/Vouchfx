@@ -12,6 +12,7 @@ import {
   type MtPlatform,
   type MetaApiRegion,
 } from "@/lib/broker/metaapi";
+import { getEntitlements, type Plan } from "@vouchfx/core";
 
 export async function GET() {
   const supabase = await createClient();
@@ -58,6 +59,22 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "login, password, and server are required" },
       { status: 400 }
+    );
+  }
+
+  // ── Plan gate: check broker account limit ────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+  const [{ count: brokerCount }, { data: subRow }] = await Promise.all([
+    db.from("broker_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+    db.from("subscriptions").select("plan, status").eq("user_id", user.id).in("status", ["trialing", "active", "past_due"]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const plan = (subRow as { plan?: Plan } | null)?.plan ?? "trial";
+  const { maxBrokerAccounts } = getEntitlements(plan);
+  if (maxBrokerAccounts > 0 && (brokerCount ?? 0) >= maxBrokerAccounts) {
+    return NextResponse.json(
+      { error: `Your ${plan} plan allows ${maxBrokerAccounts} broker account${maxBrokerAccounts > 1 ? "s" : ""}. Upgrade to add more.`, code: "plan_limit" },
+      { status: 403 }
     );
   }
 

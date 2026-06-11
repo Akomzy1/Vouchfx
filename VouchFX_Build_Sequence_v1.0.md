@@ -63,6 +63,12 @@ Expand packages/db to the full PRD data model: add telegram_sessions, risk_setti
 In apps/web, build the authenticated app shell: Supabase Auth flows (signup, login, Google, password reset, optional TOTP per VCH-AUTH-02), and the layout with a left sidebar (Dashboard, Channels, Signals, Risk, Billing, Refer & earn, Settings) collapsing to a bottom nav on mobile. Implement the VouchFX design tokens (dark #0B0F14, surfaces #151B23, teal #14B8A6 accent, monospace tabular numbers, green/red reserved for P&L/status). Build reusable components: StatCard, StatusPill, DataTable, Card. Reference the prototype context doc for the look.
 ```
 
+## Prompt P1.2b — Production marketing landing page
+```
+In apps/web, build the public marketing landing page as a server-rendered, SEO-optimised route (static/ISR, fast, indexable — competitors rank for "telegram signal copier"). Translate the validated claude.ai landing prototype into the real app using the VouchFX design language. Sections: sticky nav (wordmark; Features, How it works, Pricing, a subtle Telegram icon+label link, Login; teal "Start free trial"); audience-neutral hero ("Your Telegram signals, traded automatically on MT5" / "Any signal, any format, executed under your own risk rules. Whether you trade a live account or a funded one, VouchFX keeps every trade inside your limits.") with the signal→trade visual and the free-trial CTA as the single primary action; trust strip; how-it-works (3 steps); feature grid (AI parsing, fully-managed execution, transparent audit log, risk controls, funded-trader-friendly as ONE card, naira & card checkout); pricing (Starter $19 / Pro $39 "most popular" / Funded $79 / Lifetime $399, USD or naira); a rule-monitor band between features and pricing (headline "Prop firm changed the rules? We already know.", body on the AI agent monitoring firm terms with changes detected, human-verified, and live in guardrails, plus the "last verified" stamp, with a mock "FundingPips · Daily loss: 5% → 4% · Verified today" card and caption "Available on the Funded plan"); an affiliate band ("Run a signal channel? Earn 20% recurring"); a community strip ("Join the VouchFX community on Telegram"); and a footer.
+Telegram channel link is https://t.me/getvouchfx — used in the nav, the community strip, and the footer ("Join our Telegram", paper-plane icon), opening in a new tab. NOT in the hero. Footer includes the disclaimer: "VouchFX is an execution tool you control. It does not provide financial advice or guarantee outcomes. Trading involves risk." Keep the page audience-neutral (live-account traders are primary; prop is a supported use case, not the identity) and fully responsive.
+```
+
 ### Telegram
 
 ## Prompt P1.3 — Telegram connect + encrypted sessions
@@ -141,6 +147,11 @@ Implement the gate order from the risk-engine skill: daily signal limit global +
 Add daily loss cap → pause + optional close-all (VCH-RSK-03), default-SL policy apply/skip/ask (VCH-RSK-04), breakeven-after-TP1 and trailing-after-TP2 (VCH-RSK-05), and news filter (VCH-RSK-06). All decisions written to audit_events.
 ```
 
+## Prompt P1.16b — Execution Mode (mirror vs apply-my-rules)
+```
+Implement Execution Mode in the risk engine and settings (VCH-RSK-09..12, see risk-engine skill). Global + per-channel setting: "Mirror provider exactly" vs "Apply my risk rules" (default Apply). In Mirror mode: place the provider's SL/TP prices unchanged; do NOT substitute a default SL or apply breakeven/trailing unless explicitly opted in; size volume via the mirror lot sub-choice (provider's stated lot → else fixed → else risk-based, VCH-RSK-10); a no-SL signal executes ONLY if the user's "allow no stop loss" acknowledgement is on, else skip-with-reason (VCH-RSK-11). CRITICAL: hard caps (daily signal limit, max trades/day, daily loss cap) remain enforced in BOTH modes (VCH-RSK-12). Surface the toggle, lot sub-choice, and no-SL acknowledgement in onboarding Step 4 and the Risk settings screen. Unit-test that Mirror mode preserves provider levels yet still respects caps.
+```
+
 ### Dashboard & UX
 
 ## Prompt P1.17 — Dashboard
@@ -155,7 +166,7 @@ Build the signal-detail/audit view (VCH-DSH-02, 03): raw message → parsed fiel
 
 ## Prompt P1.19 — Channels + risk settings UI
 ```
-Build the Channels management UI (list, toggles, status Live/Demo-first/Paused, per-channel daily signal limit, kill switch, overrides) and the global Risk settings UI (sizing, daily limits, drawdown guardian, default-SL policy, breakeven/trailing, news filter) with sensible defaults and helper text. Sticky Save.
+Build the Channels management UI (list, toggles, status Live/Demo-first/Paused, per-channel daily signal limit, kill switch, overrides) and the global Risk settings UI (Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, sizing, daily limits, drawdown guardian, default-SL policy, breakeven/trailing, news filter) with sensible defaults and helper text. Sticky Save.
 ```
 
 ## Prompt P1.20 — Notifications
@@ -189,7 +200,7 @@ Build Referral & affiliate (PRD §6.11, all M items): unique links/codes, last-t
 
 ## Prompt P1.25 — Onboarding wizard
 ```
-Stitch the 5-step onboarding wizard (VCH-ONB-01): Connect Telegram (+ optional referral code field) → Choose channels → Connect broker → Set risk (incl. daily signal limit) → Go live (with demo-first option and the required risk-disclaimer checkbox, VCH-ONB-02). Resumable, ≤90s active time.
+Stitch the 5-step onboarding wizard (VCH-ONB-01): Connect Telegram (+ optional referral code field) → Choose channels → Connect broker → Set risk (incl. Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, and daily signal limit) → Go live (with demo-first option and the required risk-disclaimer checkbox, VCH-ONB-02). Resumable, ≤90s active time.
 ```
 
 ## Prompt P1.26 — Demo-first mode
@@ -212,5 +223,87 @@ Final MVP hardening: verify no Telegram-session write paths exist; verify creden
 ## Notes
 - **Demo-first (P1.26) and news filter (in P1.16)** are PRD **S**-priority — include in MVP if time allows, otherwise defer to immediately post-launch without breaking the sequence.
 - Resolve PRD §14 open questions before the prompts they touch: **R5** (default-SL default) before P1.16; **R10** (billing entity) before P1.21; **R9** (commission structure) before P1.24; **R8** (model pins) is already set in CLAUDE.md.
-- After Phase 1: Phase 2 adds multi-platform (cTrader Open API, DXTrade, TradeLocker, Deriv — new Executor implementations behind the existing interface) and the **Prop Mode rule engine (PRD §6.12)**: the versioned firm rule library, per-account rule profiles, the real-time equity guardian, the consistency manager, firm-tuned news/weekend handling, stealth execution, and pre-trade rule simulation. Multi-platform is a prerequisite for Prop Mode, since prop firms run heavily on cTrader/DXTrade/TradeLocker, not just MT5. Phase 3 adds the self-hosted MT5-on-Wine execution backend behind the same Executor interface.
+- After Phase 1: **Phase 2 (MT5-only)** adds the **Prop Mode rule engine (PRD §6.12)**: the versioned firm rule library, per-account rule profiles, the real-time equity guardian, the consistency manager, firm-tuned news/weekend handling, stealth execution, and pre-trade rule simulation — plus Stripe + Stripe Tax, the Lifetime SKU, the referral/affiliate program, and vision/parsing hardening. On MT5 this reaches MT5-based prop firms only. **Phase 3** adds multi-platform (cTrader Open API, DXTrade, TradeLocker, Deriv — new Executor implementations behind the existing interface), which extends Prop Mode to non-MT5 firms, plus the self-hosted MT5-on-Wine execution backend. The Prop Mode rule engine is platform-agnostic logic, so building it on MT5 now is not wasted — it lights up for more firms once multi-platform lands.
+
+---
+
+# PHASE 2 — Prop Mode (MT5-only) + Rule Monitor
+
+Prereqs: Phase 1 exit criteria met. Decisions baked in: approver is a **fillable role** (permission, not a person); rule library includes **only firms that explicitly permit copy trading/EAs** (e.g. FundingPips, The5ers, FXIFY, BrightFunded — verify each when seeding). Still open before P2.14: Prop-tier-vs-Funded pricing (PRD R11).
+
+### Rule library & engine
+
+## Prompt P2.1 — Rule schema + library tables
+```
+In packages/db, add the Prop Mode schema: prop_firms, prop_rulesets (versioned, per firm+challenge: daily_loss {pct, basis equity|balance}, max_drawdown {pct, model static|eod_trailing|intraday_trailing}, consistency_pct, news_window {before_min, after_min}, weekend_holding_allowed, min_trading_days, copy_trading_permitted, source_url, verified_at, published_by, version), prop_account_profiles (broker_connection_id → active firm+challenge ruleset), and an append-only prop_rule_audit. RLS: rulesets are global-read; profiles are user-scoped; publishing requires the approver role (VCH-PROP-01, 02, 14). Add a rule_approver permission as a first-class role.
+```
+
+## Prompt P2.2 — Seed copy-friendly firm presets
+```
+Seed the library with an initial set of copy-trading-permitted firms (verify each firm's current published rules at seeding time and record source_url + verified_at): e.g. FundingPips, The5ers, FXIFY, BrightFunded — 1–2 challenge types each. Every seeded preset must have copy_trading_permitted = true (launch criterion, VCH-PROP-01). Build a small internal page listing seeded presets with their last-verified dates.
+```
+
+## Prompt P2.3 — Prop rule engine in the gate
+```
+Extend the risk engine (packages/core, pure logic): when a broker account has an active prop profile, evaluate every signal against the loaded ruleset BEFORE execution and write pass/fail per rule to audit_events (VCH-PROP-10). Per-account profiles run independently — a user with accounts on two firms enforces each correctly (VCH-PROP-02). Unit-test rule evaluation per field.
+```
+
+## Prompt P2.4 — Real-time equity guardian
+```
+Implement the equity guardian (VCH-PROP-03): stream equity from MetaApi for prop accounts and track it against the firm's equity-based intraday daily-loss floor and drawdown floor. Pre-block signals that would risk a breach; auto-flatten before the floor is touched (configurable buffer). All triggers logged with reason. This is latency-sensitive — keep it in the executor worker, co-located with the MetaApi region.
+```
+
+## Prompt P2.5 — Drawdown tracker (model-aware)
+```
+Implement the drawdown tracker (VCH-PROP-04) supporting static, EOD-trailing, and intraday-trailing models: compute and persist the current floor per the firm's model, refuse trades that would breach it (skip-with-reason), and expose the live floor to the dashboard. Unit-test each model against worked examples.
+```
+
+## Prompt P2.6 — Consistency manager
+```
+Implement the consistency manager (VCH-PROP-05): track per-day realised profit across the evaluation/funded period; as the best day approaches the firm's consistency cap (e.g. 28% vs 30%), throttle then pause copying for the day with reason; expose a profit-distribution series for the UI consistency meter.
+```
+
+## Prompt P2.7 — Firm-tuned news, weekend, min-days
+```
+Wire the firm's exact news window into the news filter (skip/auto-flatten inside the window, VCH-PROP-06); auto-close positions before Friday close for firms banning weekend holding, and track min-trading-days progress (VCH-PROP-07). All actions logged.
+```
+
+## Prompt P2.8 — Stealth execution
+```
+Implement stealth (VCH-PROP-08): randomised lot variation within the user's risk budget, micro-delays, slight SL/TP jitter, neutral order comments — configurable, on by default for prop accounts. Verify two accounts copying the same signal place non-identical orders. Document honestly in the UI that stealth reduces, not eliminates, copy-group detection risk.
+```
+
+## Prompt P2.9 — Prop Mode UI
+```
+Build the Prop Mode screen (per the prototype Prompt 9): account selector with firm preset + "rules last verified" date, live rule cards (usage vs limit with status pills), the equity-guardian gauge, the consistency meter, stealth settings strip, and the copy-permission warning banner (VCH-PROP-09). Realtime updates via Supabase Realtime.
+```
+
+### Rule Monitor agent
+
+## Prompt P2.10 — Monitor agent (fetch → extract → diff)
+```
+Build the Rule Monitor agent as a scheduled job (apps/executor or a small apps/agent worker): for each supported firm, fetch the rules source, extract the structured ruleset with Claude (structured output against the prop_rulesets schema), diff against the stored version, and record proposals with source_url, detected_at, and a confidence score (VCH-PROP-11). No publishing in this prompt — proposals only.
+```
+
+## Prompt P2.11 — Confidence-tiered publishing + approval queue
+```
+Implement publishing rules (VCH-PROP-12): account-killing fields (daily_loss, max_drawdown, consistency_pct) ALWAYS require approval; low-stakes high-confidence changes may auto-publish (logged, reversible); low-confidence → flagged for manual entry. Build the approval queue UI per prototype Prompt 10: diff old→new, stakes tag, source link, confidence pill, Approve/Reject/Edit — gated to the rule_approver role (VCH-PROP-13). Approvals/rejections write to prop_rule_audit.
+```
+
+## Prompt P2.12 — Versioning, rollback, notifications
+```
+Complete version-stamping (VCH-PROP-14) and rollback (VCH-PROP-15): version history per firm with published-by/source/date, one-click rollback (logged), and the user-facing "rules last verified" surfacing the latest verification. Notify the approver (email/in-app) when new proposals land, and notify affected users when a rule change on THEIR firm is published.
+```
+
+### Wrap-up
+
+## Prompt P2.13 — Plan gating + pricing hook
+```
+Gate Prop Mode to the Funded tier (current PRD §11), with the entitlement check structured so a dedicated premium Prop tier can be introduced without code restructuring (PRD R11 still open on pricing). Update the billing UI to show Prop Mode availability per plan.
+```
+
+## Prompt P2.14 — Phase 2 hardening
+```
+Hardening pass: unit tests for each drawdown model, consistency throttling, equity-guardian trigger, and approval-role enforcement (non-approvers cannot publish); verify rule changes propagate to live enforcement only via published versions; confirm every prop decision is reconstructable from audit_events + prop_rule_audit. Run the full suite and confirm Phase 2 exit: Prop Mode live on seeded copy-friendly firms with the Rule Monitor running on schedule.
+```
 ```

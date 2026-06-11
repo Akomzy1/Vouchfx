@@ -1,5 +1,7 @@
 export * from "./client";
 export * from "./audit";
+export { publishPropRuleset, rollbackPropRuleset } from "./prop-publishing";
+export type { PublishParams, RollbackParams } from "./prop-publishing";
 export type {
   Database,
   Json,
@@ -31,6 +33,18 @@ export type {
   ReferralInsert,
   AffiliateAccountInsert,
   PayoutInsert,
+  // Phase 2 row types
+  UserRoleRow,
+  PropFirmRow,
+  PropRulesetRow,
+  PropAccountProfileRow,
+  PropRuleAuditRow,
+  // Phase 2 insert types
+  UserRoleInsert,
+  PropFirmInsert,
+  PropRulesetInsert,
+  PropAccountProfileInsert,
+  PropRuleAuditInsert,
   // Enums
   Platform,
   SignalSide,
@@ -50,4 +64,10 @@ export type {
   ReferralStatus,
   PayoutMethod,
   PayoutStatus,
+  // Phase 2 enums
+  UserRole,
+  DailyLossBasis,
+  DrawdownModel,
+  PropRulesetStatus,
+  PropRuleAuditAction,
 } from "./types";

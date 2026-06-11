@@ -1,0 +1,37 @@
+# Fly.io configuration for the VouchFX listener worker.
+# Rename app to match your Fly.io app name before deploying.
+app = "vouchfx-listener"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  HEALTH_PORT = "3002"
+
+# Secrets — set via: fly secrets set KEY=value
+# Required: TELEGRAM_API_ID, TELEGRAM_API_HASH, ENCRYPTION_KEY,
+#           SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, REDIS_URL
+# Optional: SENTRY_DSN, ADMIN_EMAILS
+
+[http_service]
+  internal_port = 3002
+  force_https = false
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[restart]
+  policy = "always"

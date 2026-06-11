@@ -27,19 +27,45 @@ export default async function ChannelsPage() {
   const lastConnectedAt: string | null = session?.last_connected_at ?? null;
   const connected = status === "active" || status === "limited";
 
-  // Signal sources for this user (only if connected)
   let initialSources: ChannelSource[] = [];
   if (connected) {
+    // Fetch sources (exclude those with a pending kill-close — executor is handling them)
     const { data: sources } = await db
       .from("signal_sources")
-      .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, created_at")
+      .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, demo_until, override_risk_enabled, override_risk_pct, created_at")
       .eq("user_id", user.id)
+      .is("kill_close_requested_at", null)
       .order("created_at", { ascending: false });
 
-    initialSources = (sources ?? []).map((s: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-      ...s,
-      telegram_chat_id: String(s.telegram_chat_id),
-    }));
+    if (sources && sources.length > 0) {
+      // Count today's signals per source
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+
+      const { data: counts } = await db
+        .from("parsed_signals")
+        .select("source_id")
+        .in("source_id", (sources as any[]).map((s: any) => s.id))
+        .eq("is_signal", true)
+        .gte("created_at", today.toISOString());
+
+      const signalCounts = new Map<string, number>();
+      for (const row of (counts ?? []) as { source_id: string }[]) {
+        signalCounts.set(row.source_id, (signalCounts.get(row.source_id) ?? 0) + 1);
+      }
+
+      initialSources = (sources as any[]).map((s: any) => ({
+        id:                   s.id,
+        telegram_chat_id:     String(s.telegram_chat_id),
+        title:                s.title,
+        is_enabled:           s.is_enabled,
+        daily_signal_limit:   s.daily_signal_limit,
+        demo_until:           s.demo_until,
+        override_risk_enabled: s.override_risk_enabled ?? false,
+        override_risk_pct:    s.override_risk_pct ?? null,
+        signals_today:        signalCounts.get(s.id) ?? 0,
+      }));
+    }
   }
 
   return (
@@ -51,10 +77,8 @@ export default async function ChannelsPage() {
         </p>
       </div>
 
-      {/* Telegram connection card */}
       <ConnectFlow initialStatus={status} lastConnectedAt={lastConnectedAt} />
 
-      {/* Channel list — only shown when Telegram is connected */}
       {connected && (
         <ChannelList initialSources={initialSources} />
       )}

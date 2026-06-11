@@ -1,0 +1,38 @@
+# Fly.io configuration for the VouchFX executor worker.
+# Rename app to match your Fly.io app name before deploying.
+app = "vouchfx-executor"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  HEALTH_PORT = "3001"
+
+# Secrets — set via: fly secrets set KEY=value
+# Required: ANTHROPIC_API_KEY, METAAPI_TOKEN,
+#           SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+#           REDIS_URL, ENCRYPTION_KEY
+# Optional: SENTRY_DSN, ADMIN_EMAILS
+
+[http_service]
+  internal_port = 3001
+  force_https = false
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[restart]
+  policy = "always"

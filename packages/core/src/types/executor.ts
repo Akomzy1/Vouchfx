@@ -2,6 +2,9 @@
 // MT5 (via MetaApi) is the first implementation.
 // cTrader / DXTrade / TradeLocker / Deriv implement the same interface later.
 
+import type { SymbolSpec } from "../risk/types";
+export type { SymbolSpec };
+
 export interface BrokerConnection {
   id: string;
   userId: string;
@@ -53,6 +56,17 @@ export type TradeState = "PENDING" | "FILLED" | "CLOSED" | "CANCELLED" | "UNKNOW
 
 export interface Executor {
   validateConnection(conn: BrokerConnection): Promise<AccountInfo>;
+  /** Fetch live account balance in account currency. */
+  getAccountBalance(conn: BrokerConnection): Promise<number>;
+  /** Fetch live balance + equity (equity = balance + floating P&L). */
+  getAccountInfo(conn: BrokerConnection): Promise<{ balance: number; equity: number }>;
+  /**
+   * Sum of profits from closed deals since `since` (UTC).
+   * Returns 0 if the broker history API is unavailable.
+   */
+  getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number>;
+  /** Fetch broker symbol specification needed by the risk engine. */
+  getSymbolSpec(symbol: string, conn: BrokerConnection): Promise<SymbolSpec>;
   /** Resolve broker-specific symbol suffix/gold-format. Returns null if unavailable. */
   resolveSymbol(raw: string, conn: BrokerConnection): Promise<string | null>;
   placeOrder(req: OrderRequest): Promise<OrderResult>;

@@ -38,19 +38,40 @@ const envSchema = z.object({
   // Resend — transactional email
   RESEND_API_KEY: z.string().optional(),
 
-  // Stripe — global billing
+  // Stripe — global billing (PRD R10: must bill via non-Nigerian entity — UK Ltd or US LLC)
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Price IDs — create in Stripe dashboard (test mode) and copy here
+  STRIPE_PRICE_STARTER_ID:  z.string().optional(),
+  STRIPE_PRICE_PRO_ID:      z.string().optional(),
+  STRIPE_PRICE_FUNDED_ID:   z.string().optional(),
+  STRIPE_PRICE_LIFETIME_ID: z.string().optional(),
 
-  // Paystack — Nigeria billing
+  // Paystack — Nigeria billing (NGN)
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_WEBHOOK_SECRET: z.string().optional(),
+  // Plan codes from Paystack dashboard (create recurring plans, copy the plan_code)
+  PAYSTACK_PLAN_STARTER_CODE:  z.string().optional(),
+  PAYSTACK_PLAN_PRO_CODE:      z.string().optional(),
+  PAYSTACK_PLAN_FUNDED_CODE:   z.string().optional(),
+  // Lifetime one-off amount in kobo (1 NGN = 100 kobo); e.g. 59900000 = ₦599,000
+  PAYSTACK_LIFETIME_AMOUNT_KOBO: z.coerce.number().int().positive().optional(),
+
+  // Monitoring
+  // Sentry DSN — optional; if absent, error tracking is disabled.
+  SENTRY_DSN: z.string().url().optional(),
+  // Comma-separated admin email addresses (e.g. "alice@example.com,bob@example.com")
+  ADMIN_EMAILS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
 
 export function parseEnv(raw: NodeJS.ProcessEnv = process.env): Env {
-  const result = envSchema.safeParse(raw);
+  // Treat empty strings from .env files as absent so optional validators don't fail.
+  const cleaned = Object.fromEntries(
+    Object.entries(raw).map(([k, v]) => [k, v === "" ? undefined : v])
+  );
+  const result = envSchema.safeParse(cleaned);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join(".")}: ${i.message}`)

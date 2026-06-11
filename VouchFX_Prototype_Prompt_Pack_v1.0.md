@@ -42,13 +42,15 @@ Confirm you've absorbed this, then wait for the screen I ask you to build.
 Using the VouchFX design language, build the VouchFX marketing landing page as a single responsive React artifact.
 
 Sections, top to bottom:
-1. Sticky top nav: VouchFX wordmark (teal dot + "VouchFX"), links (Features, How it works, Pricing, Login), and a teal "Start free trial" button.
+1. Sticky top nav: VouchFX wordmark (teal dot + "VouchFX"), links (Features, How it works, Pricing, a subtle Telegram icon+label linking to https://t.me/getvouchfx in a new tab, Login), and a teal "Start free trial" button.
 2. Hero: headline "Your Telegram signals, traded automatically on MT5." Subhead: "Any signal, any format, executed under your own risk rules. Whether you trade a live account or a funded one, VouchFX keeps every trade inside your limits." Keep the page audience-neutral — everyday live-account traders are the primary audience; prop support is a supported use case, never the identity. Two CTAs: "Start 7-day free trial" (teal) and "See how it works" (ghost). To the right (or below on mobile), a stylized mock of a Telegram signal message turning into an executed MT5 trade card (show the signal text → an arrow → a trade ticket with symbol XAUUSD, BUY, 0.12 lots, SL/TP, and a small green +$84.20).
 3. Trust strip: "Works with any MT5 broker" with logos-as-text pills (Exness, HFM, FXTM, Deriv, IC Markets) and small stats (e.g. "<1s execution", "Any signal format", "No VPS, no downloads").
 4. How it works: 3 steps — Connect Telegram, Connect your broker, Set your risk — each with an icon and one line.
 5. Feature grid (6 cards): AI parsing (text + screenshots), Fully-managed execution (no MetaApi setup), Transparent audit log, Risk controls (daily signal limit, daily loss cap), Funded-trader friendly (daily-loss, drawdown & consistency guardrails) — as just ONE card among the others, not a hero theme, Naira & card checkout.
 6. Pricing: 4 cards — Starter $19/mo, Pro $39/mo (highlighted "Most popular"), Funded $79/mo, Lifetime $399 one-off — with the key gating differences (broker accounts, prop-firm features). A note: "Pay in USD or naira."
-7. Footer with disclaimer line: "VouchFX is an execution tool you control. It does not provide financial advice or guarantee outcomes. Trading involves risk."
+6b. Rule-monitor band (between the feature grid and pricing): headline "Prop firm changed the rules? We already know." Body: "Our AI agent monitors your prop firm around the clock — drawdown limits, daily loss, consistency rules, news windows. When a firm updates its terms, the change is detected, human-verified, and live in your guardrails before it can catch you out. Every ruleset shows when it was last verified, so you're never trading on stale rules." Visual: a compact mock card — "FundingPips · Daily loss: 5% → 4% · Verified today" with a teal check. Caption: "Available on the Funded plan." One band only — the page stays audience-neutral.
+7. Community strip (just above the footer): "Questions? Join the VouchFX community on Telegram" with a ghost "Open Telegram" button linking to https://t.me/getvouchfx (new tab). Keep it understated — the free trial stays the primary CTA.
+8. Footer with a "Join our Telegram" link (Telegram paper-plane icon, https://t.me/getvouchfx) and the disclaimer line: "VouchFX is an execution tool you control. It does not provide financial advice or guarantee outcomes. Trading involves risk."
 
 Make it polished and conversion-focused. Mobile responsive.
 ```
@@ -159,7 +161,7 @@ Using the VouchFX design language, build the VouchFX "Billing & plans" screen as
 
 Top: current plan card — "Free trial — 5 days left, 1 signal/day" with a teal "Upgrade" CTA and a usage note.
 
-Plan selection: 4 cards — Starter $19/mo, Pro $39/mo (badge "Most popular"), Funded $79/mo, Lifetime $399 one-off. Each lists: broker accounts (1 / 3 / 10 / 3), signals per day (1 on trial vs unlimited on paid), prop-firm features (Pro+), priority/failover (Funded), and the current plan marked. A monthly/annual toggle for the subscription tiers.
+Plan selection: 4 cards — Starter $19/mo, Pro $39/mo (badge "Most popular"), Funded $79/mo, Lifetime $399 one-off. Each lists: broker accounts (1 / 3 / 10 / 3), signals per day (1 on trial vs unlimited on paid), prop-firm features (Pro+), priority/failover (Funded), and the current plan marked. Monthly billing only (no annual toggle).
 
 Payment method section: two options presented clearly — "Pay with card (USD)" via Stripe and "Pay in naira" via Paystack — as selectable cards. Show a mock checkout summary panel (selected plan, price, "billed monthly", a teal "Confirm & subscribe" button).
 
@@ -234,6 +236,30 @@ Stealth execution: a small settings strip — toggles/sliders for randomised lot
 A subtle banner if the selected firm restricts copying: amber "This firm restricts copy trading — review their terms before enabling." (show it as a dismissible example).
 
 Use realistic mock data, monospace tabular numbers, green/red reserved for P&L and breach status, amber for caution. Mobile responsive.
+```
+
+---
+
+## Prompt 10 — Rule Monitor approval queue (admin)
+
+```
+Using the VouchFX design language, build the VouchFX "Rule Monitor" admin screen as a single responsive React artifact. This is an internal/ops screen where a rule approver reviews prop-firm rule changes detected by an AI agent before they go live. Audience: an assigned approver (a fillable role), not end users.
+
+Top: a header "Rule Monitor" with a status line ("Agent last ran: today 06:00 · 14 firms monitored · 3 changes pending") and a small "Approver" badge.
+
+Main: a pending-changes queue — each item a card showing:
+- Firm + challenge (e.g. "FundingPips — 100K 2-step").
+- The diff, old → new, with the changed field highlighted (e.g. "Daily loss: 5% → 4%").
+- A stakes tag: red "Account-killing — approval required" (daily loss / drawdown / consistency) vs neutral "Low-stakes" (e.g. news window minutes).
+- Source link, detected date, and an agent-confidence pill (High / Medium / Low).
+- Actions: teal "Approve", ghost "Reject", ghost "Edit value".
+Include 3 mock items: one account-killing high-confidence (FundingPips daily loss 5% → 4%), one low-stakes item shown as already auto-published with an "Undo/rollback" link (The5ers news window 2 → 3 min), and one low-confidence flagged item needing manual entry (FXIFY — "source unclear, manual review needed").
+
+Below: a "Version history" table for a selected firm: version, change summary, published by (Agent auto / Approver name), date, source link, and a "Rollback" action per row.
+
+A footer note: "Only firms that explicitly permit copy trading are supported."
+
+Use the design language exactly: dark, teal actions, amber for caution/pending, red ONLY for the account-killing stakes tag, monospace for values. Mobile responsive.
 ```
 
 ---
