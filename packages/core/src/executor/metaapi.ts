@@ -43,12 +43,18 @@ import { createHash } from "node:crypto";
 import { SYMBOL_VARIANTS } from "./symbol-map";
 
 /**
- * MetaApi clientId allows only digits, latin letters, dash and underscore,
- * max 26 chars. Idempotency keys ("<chatId>:<msgId>:<edit>") contain colons,
- * which fail validation — derive a deterministic compliant id instead.
+ * MetaApi clientId must match the pattern TE_<symbol>_<id> — verified
+ * empirically against the live API (2026-06-12): "TE_GBPUSD_x…" passes,
+ * "vfx…"/"vfxhash"/"TE_x…" (one segment) are all rejected with "Value must
+ * match required pattern". Both segments must be alphanumeric; broker
+ * symbols can carry suffixes like ".micro", so the symbol is sanitized.
+ * The id segment is a deterministic hash of the idempotency key
+ * ("<chatId>:<msgId>:<edit>", whose colons fail validation outright).
  */
-export function toMetaApiClientId(clientOrderId: string): string {
-  return "vfx-" + createHash("sha256").update(clientOrderId).digest("hex").slice(0, 20);
+export function toMetaApiClientId(symbol: string, clientOrderId: string): string {
+  const sym = symbol.replace(/[^A-Za-z0-9]/g, "").slice(0, 8) || "X";
+  const id = createHash("sha256").update(clientOrderId).digest("hex").slice(0, 12);
+  return `TE_${sym}_${id}`;
 }
 
 export class MetaApiExecutor implements Executor {
@@ -197,7 +203,7 @@ export class MetaApiExecutor implements Executor {
 
     const opts = {
       comment: comment ?? "VouchFX",
-      clientId: toMetaApiClientId(clientOrderId),
+      clientId: toMetaApiClientId(symbol, clientOrderId),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
