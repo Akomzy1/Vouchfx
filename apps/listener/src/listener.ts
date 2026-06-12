@@ -119,8 +119,15 @@ export async function startListening(
     const message = event.message;
     if (!message) return;
 
-    const msgChatId: bigint =
-      typeof event.chatId === "bigint" ? event.chatId : BigInt(0);
+    // GramJS chat ids are big-integer library objects, NOT native bigint —
+    // normalize via toString. A zero/missing chat id must be skipped: it
+    // breaks idempotency and BullMQ rejects job ids starting with "0:".
+    const rawChatId = event.chatId ?? message.chatId;
+    if (rawChatId == null) {
+      console.warn(`[listener] msg ${message.id}: event has no chat id — skipped`);
+      return;
+    }
+    const msgChatId = BigInt(rawChatId.toString());
     const msgId: number = message.id as number;
     // editDate is a Unix timestamp (seconds) set by Telegram when a message
     // is edited. 0 means never edited (new message).
