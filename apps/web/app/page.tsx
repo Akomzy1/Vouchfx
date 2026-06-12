@@ -18,7 +18,7 @@ import {
   Radar,
   Eye,
   UserCheck,
-  History,
+  CalendarClock,
   Gift,
   Radio,
   Percent,
@@ -369,15 +369,18 @@ export default function LandingPage() {
               </h2>
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-text-secondary">
                 Our AI agent monitors your prop firm around the clock — drawdown limits, daily loss,
-                consistency rules, news windows. When a firm updates its terms, the change is detected,
+                consistency rules, news restrictions. When a firm updates its terms, the change is detected,
                 human-verified, and live in your guardrails before it can catch you out. Every ruleset
-                shows when it was last verified, so you&rsquo;re never trading on stale rules.
+                shows when it was last verified, so you&rsquo;re never trading on stale rules. And we watch the
+                economic calendar too — high-impact events like NFP, CPI, and rate decisions are tracked
+                automatically, so VouchFX stands your trades down inside your firm&rsquo;s news window without
+                you lifting a finger.
               </p>
               <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2.5">
                 {([
                   [Eye, "24/7 monitoring"],
                   [UserCheck, "Human-verified"],
-                  [History, "Last-verified timestamps"],
+                  [CalendarClock, "News-window aware"],
                 ] as [React.ElementType, string][]).map(([I, label]) => (
                   <span key={label} className="flex items-center gap-2 text-[13px] font-medium text-text-secondary">
                     <I size={15} className="text-primary" /> {label}
@@ -424,6 +427,22 @@ export default function LandingPage() {
                     <ShieldCheck size={15} className="text-primary-light" /> Guardrail updated
                   </span>
                   <span className="text-[11px] text-text-muted">Auto-applied</span>
+                </div>
+                <div className="mt-3.5 flex items-center justify-between rounded-xl border border-warning/30 bg-warning/[0.08] px-3.5 py-3">
+                  <span className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-warning/30 bg-warning/10 text-warning">
+                      <CalendarClock size={14} />
+                    </span>
+                    <span className="leading-tight">
+                      <span className="block text-[13px] font-semibold text-text-primary">
+                        NFP · <span className="num">13:30 UTC</span>
+                      </span>
+                      <span className="block text-[11px] text-warning">High impact</span>
+                    </span>
+                  </span>
+                  <span className="rounded-md bg-warning/15 px-2 py-1 text-[11px] font-semibold text-warning">
+                    Trades paused
+                  </span>
                 </div>
               </div>
             </div>
