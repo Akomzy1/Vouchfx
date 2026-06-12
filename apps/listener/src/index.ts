@@ -18,6 +18,7 @@ log.info("starting", { NODE_ENV: env.NODE_ENV });
 
 const QUEUE_NAME = "vouchfx-signals";
 const SYNC_INTERVAL_MS = 30_000;
+const WATCHDOG_INTERVAL_MS = 60_000;
 
 const required: [string, unknown][] = [
   ["TELEGRAM_API_ID", env.TELEGRAM_API_ID],
@@ -69,20 +70,43 @@ healthServer.listen(HEALTH_PORT, () => {
   const stopHeartbeat = startHeartbeat(db, WORKER_ID, "listener", { version: env.NODE_ENV });
   const heartbeatTimer = setInterval(() => { lastHeartbeatAt = Date.now(); }, 30_000);
 
+  // sync and watchdog both mutate pool entries — never run them concurrently
+  let maintenanceBusy = false;
+
   const syncInterval = setInterval(async () => {
+    if (maintenanceBusy) return;
+    maintenanceBusy = true;
     try {
       await pool.sync();
     } catch (err) {
       log.error("sync error", { error: (err as Error).message });
       captureException(err);
+    } finally {
+      maintenanceBusy = false;
     }
   }, SYNC_INTERVAL_MS);
+
+  // Liveness watchdog: detects zombie MTProto connections (update loop stuck
+  // on TIMEOUT, no messages delivered) and rebuilds the affected client.
+  const watchdogInterval = setInterval(async () => {
+    if (maintenanceBusy) return;
+    maintenanceBusy = true;
+    try {
+      await pool.watchdog();
+    } catch (err) {
+      log.error("watchdog error", { error: (err as Error).message });
+      captureException(err);
+    } finally {
+      maintenanceBusy = false;
+    }
+  }, WATCHDOG_INTERVAL_MS);
 
   async function shutdown(): Promise<void> {
     log.info("shutting down");
     stopHeartbeat();
     clearInterval(heartbeatTimer);
     clearInterval(syncInterval);
+    clearInterval(watchdogInterval);
     await pool.shutdown();
     await queue.close();
     redis.disconnect();

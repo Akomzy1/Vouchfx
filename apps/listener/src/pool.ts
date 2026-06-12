@@ -16,7 +16,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { Queue } from "bullmq";
 import { decryptSession, type SignalJobData } from "@vouchfx/core";
 import { parseEnv } from "@vouchfx/config";
-import { createReadonlyClient, startListening, subscribeDeletes } from "./listener";
+import { createReadonlyClient, probeConnection, startListening, subscribeDeletes } from "./listener";
+import type { ReadonlyTelegramClient } from "./readonly-guard";
 import { updateSessionStatus } from "./session-manager";
 
 const SPIKE_SOURCE_ID = "00000000-0000-0000-0000-000000000002";
@@ -32,6 +33,10 @@ interface PoolEntry {
   sourceMap: Map<string, string>;
   brokerConnectionId: string;
   disconnect: () => Promise<void>;
+  /** For the watchdog: probe target + what's needed to rebuild the client. */
+  client: ReadonlyTelegramClient;
+  session: SessionRow;
+  probeFailures: number;
 }
 
 interface SessionRow {
@@ -111,6 +116,41 @@ export class UserPool {
     }
   }
 
+  /**
+   * Liveness watchdog. GramJS connections can zombie after a network blip:
+   * the process stays up but the update loop times out forever and no
+   * messages arrive (observed in production 2026-06-12 — a signal was missed
+   * while heartbeats kept passing). Probe each client; after two consecutive
+   * failures, tear the client down and rebuild it from the stored session.
+   */
+  async watchdog(): Promise<void> {
+    for (const entry of [...this.entries.values()]) {
+      const alive = await probeConnection(entry.client);
+
+      if (alive) {
+        entry.probeFailures = 0;
+        continue;
+      }
+
+      entry.probeFailures += 1;
+      console.warn(
+        `[pool] user ${entry.userId} liveness probe failed (${entry.probeFailures} consecutive)`
+      );
+      if (entry.probeFailures < 2) continue;
+
+      console.warn(`[pool] user ${entry.userId} connection is dead — rebuilding client`);
+      const { session, sourceMap, brokerConnectionId } = entry;
+      await this.removeEntry(entry.userId);
+      try {
+        await this.addEntry(session, sourceMap, brokerConnectionId);
+        console.log(`[pool] user ${entry.userId} client rebuilt after dead connection`);
+      } catch (err) {
+        // Next watchdog/sync tick retries; sessions stay in DB.
+        console.error(`[pool] rebuild failed for user ${entry.userId}:`, (err as Error).message);
+      }
+    }
+  }
+
   /** Disconnect all clients gracefully. */
   async shutdown(): Promise<void> {
     console.log(`[pool] shutting down ${this.entries.size} client(s)`);
@@ -124,11 +164,14 @@ export class UserPool {
   // ── DB queries ─────────────────────────────────────────────────────────────
 
   private async fetchSessions(): Promise<SessionRow[]> {
+    // 'disconnected' is the pool's own worker-lifecycle marker (set on
+    // shutdown/rebuild) — those sessions MUST be reloaded, otherwise a
+    // restart orphans every user. Only 'banned'/'limited' are excluded.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (this.db as any)
       .from("telegram_sessions")
       .select("user_id, session_string_encrypted, api_id")
-      .eq("status", "active");
+      .in("status", ["active", "disconnected"]);
 
     if (error) {
       console.error("[pool] fetchSessions error:", error.message);
@@ -272,6 +315,9 @@ export class UserPool {
       sourceMap: effectiveChatSourceMap,
       brokerConnectionId,
       disconnect: () => client.disconnect(),
+      client,
+      session,
+      probeFailures: 0,
     });
 
     await updateSessionStatus(userId, "active").catch(() => {});
@@ -348,7 +394,11 @@ export class UserPool {
     if (!entry) return;
     this.entries.delete(userId);
     try {
-      await entry.disconnect();
+      // Race against a timeout — disconnect() can hang on a dead connection.
+      await Promise.race([
+        entry.disconnect(),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
     } catch (err) {
       console.error(`[pool] disconnect error for user ${userId}:`, (err as Error).message);
     }

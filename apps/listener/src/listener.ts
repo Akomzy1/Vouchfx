@@ -1,4 +1,4 @@
-import { TelegramClient } from "telegram";
+import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage } from "telegram/events";
 import { DeletedMessage } from "telegram/events/DeletedMessage";
@@ -39,6 +39,39 @@ export function createReadonlyClient(
     baseLogger: undefined,
   });
   return asReadonly(client);
+}
+
+// ─── liveness probe ──────────────────────────────────────────────────────────
+
+/**
+ * Probe whether the MTProto connection is actually alive.
+ *
+ * GramJS can enter a zombie state after a network blip: the process keeps
+ * running and `connected` stays true, but the update loop times out forever
+ * and no messages are delivered. updates.GetState is a READ-ONLY state query
+ * (the same call GramJS's own update loop issues) — the cast back to
+ * TelegramClient is the explicit, auditable exception the readonly guard
+ * requires; no write operation is performed.
+ */
+export async function probeConnection(
+  client: ReadonlyTelegramClient,
+  timeoutMs = 15_000
+): Promise<boolean> {
+  const raw = client as unknown as TelegramClient;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      raw.invoke(new Api.updates.GetState()),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("probe timeout")), timeoutMs);
+      }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // ─── subscription ────────────────────────────────────────────────────────────
