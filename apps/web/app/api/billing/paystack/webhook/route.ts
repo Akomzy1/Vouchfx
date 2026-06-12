@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyWebhookSignature, verifyTransaction, planFromCode } from "@/lib/paystack";
 import { createServiceClient } from "@/lib/supabase/service";
 import { accrueCommission } from "@/lib/referral";
+import { PLAN_USD_PRICE } from "@vouchfx/core";
 
 export const dynamic = "force-dynamic";
 
@@ -59,8 +60,12 @@ async function handleChargeSuccess(db: ReturnType<typeof createServiceClient>, d
   const customerCode = txn.customer.customer_code;
   await db.from("users").update({ paystack_customer_code: customerCode }).eq("id", userId);
 
-  // Commission accrual (fire-and-forget — never block subscription update)
-  const amountUsd = txn.amount / 100;
+  // Commission accrual (fire-and-forget — never block subscription update).
+  // Paystack charges NGN: txn.amount is kobo, NOT cents, so dividing by 100
+  // would credit naira as dollars (~1,600× too high). Commission is 20% of the
+  // plan's canonical USD price — stable, FX-independent, and identical to what
+  // the same plan earns via Stripe. Only trust amount/100 for real USD charges.
+  const amountUsd = txn.currency === "USD" ? txn.amount / 100 : PLAN_USD_PRICE[plan];
   accrueCommission(db, userId, amountUsd).catch(() => undefined);
 
   // For lifetime (one-off payment) insert a permanent subscription

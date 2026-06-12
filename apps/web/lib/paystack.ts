@@ -56,7 +56,8 @@ export async function initializeTransaction(params: {
 export interface VerifyResult {
   status: string; // "success" | "failed" | "abandoned"
   reference: string;
-  amount: number; // kobo
+  amount: number; // smallest currency unit (kobo for NGN, cents for USD)
+  currency: string; // "NGN" | "USD" | ...
   customer: { email: string; customer_code: string };
   plan?: { plan_code: string; name: string };
   subscription_code?: string;

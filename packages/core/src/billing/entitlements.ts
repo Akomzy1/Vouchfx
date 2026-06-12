@@ -59,3 +59,17 @@ export const PLAN_PRICES: Record<Plan, string> = {
   funded:   "$79 / mo",
   lifetime: "$399 once",
 };
+
+/**
+ * Canonical USD price per plan — the source of truth for money math
+ * (e.g. affiliate commission on Paystack NGN charges, where converting the
+ * charged kobo via a live FX rate would make commissions drift with the
+ * market). Keep in sync with PLAN_PRICES above.
+ */
+export const PLAN_USD_PRICE: Record<Plan, number> = {
+  trial:    0,
+  starter:  19,
+  pro:      39,
+  funded:   79,
+  lifetime: 399,
+};
