@@ -1,0 +1,20 @@
+# Keep the Docker build context small and — critically — keep secrets out of
+# images. Fly secrets provide all runtime configuration.
+**/.env
+**/.env.*
+!**/.env.example
+
+node_modules
+**/node_modules
+.git
+.turbo
+**/.turbo
+**/dist
+**/.next
+
+# Web app is deployed to Vercel, not baked into worker images
+apps/web
+
+# Design prototypes and docs — not needed in images
+*.html
+*.md

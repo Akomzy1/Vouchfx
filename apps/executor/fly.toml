@@ -1,5 +1,12 @@
 # Fly.io configuration for the VouchFX executor worker.
-# Rename app to match your Fly.io app name before deploying.
+#
+# This is an ALWAYS-ON worker (BullMQ consumer + MetaApi connections) — it must
+# never be auto-stopped, so it exposes no public HTTP service. Health is
+# monitored via a machine check against the internal /health endpoint.
+#
+# Deploy from the repo root (the Docker build needs the whole workspace):
+#   flyctl deploy -c apps/executor/fly.toml
+
 app = "vouchfx-executor"
 primary_region = "lhr"
 
@@ -10,29 +17,25 @@ primary_region = "lhr"
   NODE_ENV = "production"
   HEALTH_PORT = "3001"
 
-# Secrets — set via: fly secrets set KEY=value
+# Secrets — set via: flyctl secrets set KEY=value -a vouchfx-executor
 # Required: ANTHROPIC_API_KEY, METAAPI_TOKEN,
 #           SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 #           REDIS_URL, ENCRYPTION_KEY
-# Optional: SENTRY_DSN, ADMIN_EMAILS
+# Optional: JBLANKED_API_KEY, SENTRY_DSN, ADMIN_EMAILS, RESEND_API_KEY
 
-[http_service]
-  internal_port = 3001
-  force_https = false
-  auto_stop_machines = "suspend"
-  auto_start_machines = true
-
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
-    method = "GET"
+[checks]
+  [checks.health]
+    type = "http"
+    port = 3001
     path = "/health"
+    interval = "30s"
     timeout = "5s"
+    grace_period = "30s"
 
 [[vm]]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
 
-[restart]
+[[restart]]
   policy = "always"
