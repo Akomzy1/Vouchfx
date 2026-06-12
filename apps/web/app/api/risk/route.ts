@@ -106,13 +106,14 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
 
-  let { data, error } = await db
+  const initial = await db
     .from("risk_settings")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
+  let data = initial.data;
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (initial.error) return NextResponse.json({ error: initial.error.message }, { status: 500 });
 
   // First visit — create defaults row
   if (!data) {

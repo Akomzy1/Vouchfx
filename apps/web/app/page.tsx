@@ -157,7 +157,6 @@ function TradeTicket() {
 function LogoPill({ name, file }: { name: string; file: string }) {
   return (
     <span className="mx-2 inline-flex h-[58px] items-center justify-center rounded-xl border border-border bg-white px-6 transition-transform hover:-translate-y-0.5">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={`/logos/${file}.png`} alt={name} className="h-8 w-auto object-contain" draggable={false} />
     </span>
   );

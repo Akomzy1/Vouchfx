@@ -122,7 +122,6 @@ function ShareCard({
         {/* QR block */}
         <div className="flex shrink-0 flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-bg/40 p-4 lg:w-[176px]">
           <div className="overflow-hidden rounded-xl border border-border bg-[#0B0F14] p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qrSrc} alt="QR code to your referral link" width={116} height={116} className="h-[116px] w-[116px]" />
           </div>
           <div className="text-center">

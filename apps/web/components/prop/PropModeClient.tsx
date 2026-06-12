@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Target, AlertTriangle, CheckCircle2, XCircle, Clock, TrendingDown,
+  Target, Clock, TrendingDown,
   BarChart2, Zap, Calendar, ChevronDown, Shield, Lock, Info,
-  AlertCircle, Loader2,
+  Loader2,
 } from "lucide-react";
 import type { StealthConfig } from "@vouchfx/core";
 
@@ -632,12 +632,10 @@ function StealthStrip({
 // ── Enable Prop Mode Form ─────────────────────────────────────────────────────
 
 function EnablePropForm({
-  userId,
   broker,
   firms,
   onSuccess,
 }: {
-  userId: string;
   broker: BrokerRow;
   firms: FirmRow[];
   onSuccess: () => void;
@@ -871,7 +869,6 @@ export default function PropModeClient({
         <>
           {enablingFor === selectedBrokerId ? (
             <EnablePropForm
-              userId={userId}
               broker={selectedBroker}
               firms={firms}
               onSuccess={() => {

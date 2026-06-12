@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { CheckCircle2, Loader2, AlertCircle, Mail, Bell } from "lucide-react";
+import { Loader2, AlertCircle, Mail, Bell } from "lucide-react";
 import { NOTIFY_EVENT_META, type NotifyEventType } from "@vouchfx/core";
 
 interface Pref {

@@ -39,6 +39,7 @@ export async function GET() {
 
         // GramJS will call qrCode callback each time the QR refreshes,
         // then resolves the await when authentication completes.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (client as any).start({
           qrCode: async ({ token }: { token: Buffer }) => {
             const link = `tg://login?token=${token.toString("base64url")}`;

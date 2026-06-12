@@ -70,6 +70,7 @@ export async function storeSession(
 ): Promise<void> {
   const encrypted = encryptSession(sessionString, encryptionKey);
   const db = adminDb() as ReturnType<typeof adminDb> & { from: (t: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (db as any)
     .from("telegram_sessions")
     .upsert(

@@ -26,7 +26,6 @@ export async function GET() {
     { data: users },
     { data: sessions },
     { data: brokers },
-    { data: signals },
     { data: trades },
     { data: errors },
     { data: heartbeats },
@@ -37,8 +36,6 @@ export async function GET() {
     (svc as any).from("telegram_sessions").select("user_id, status, last_connected_at"),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (svc as any).from("broker_connections").select("user_id, is_active, last_synced_at"),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc as any).from("parsed_signals").select("source_id, created_at").order("created_at", { ascending: false }).limit(500),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (svc as any).from("trades").select("user_id, created_at").order("created_at", { ascending: false }).limit(500),
     // Errors: audit_events with type "error" in last 24h
@@ -106,7 +103,6 @@ export async function GET() {
 
   // Last signal per user (via source_id → need signal_sources for user mapping)
   // Use trades for last activity instead since they carry user_id directly
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const lastTradeMap = new Map<string, string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const t of (trades ?? []) as any[]) {
