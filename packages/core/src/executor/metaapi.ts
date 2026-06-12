@@ -39,7 +39,17 @@ import type {
   SymbolSpec,
 } from "../types/executor";
 
+import { createHash } from "node:crypto";
 import { SYMBOL_VARIANTS } from "./symbol-map";
+
+/**
+ * MetaApi clientId allows only digits, latin letters, dash and underscore,
+ * max 26 chars. Idempotency keys ("<chatId>:<msgId>:<edit>") contain colons,
+ * which fail validation — derive a deterministic compliant id instead.
+ */
+export function toMetaApiClientId(clientOrderId: string): string {
+  return "vfx-" + createHash("sha256").update(clientOrderId).digest("hex").slice(0, 20);
+}
 
 export class MetaApiExecutor implements Executor {
   private readonly api: MetaApiInstance;
@@ -153,6 +163,19 @@ export class MetaApiExecutor implements Executor {
     };
   }
 
+  async getSymbolPrice(symbol: string, conn: BrokerConnection): Promise<{ bid: number; ask: number }> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p: any = await connection.getSymbolPrice(symbol);
+    const bid = (p?.bid as number | undefined) ?? 0;
+    const ask = (p?.ask as number | undefined) ?? 0;
+    if (!(bid > 0) || !(ask > 0)) {
+      throw new Error(`[executor] no live quote for ${symbol}`);
+    }
+    return { bid, ask };
+  }
+
   async resolveSymbol(raw: string, conn: BrokerConnection): Promise<string | null> {
     const connection = await this.rpc(conn.id);
     const variants = SYMBOL_VARIANTS[raw] ?? [raw];
@@ -174,7 +197,7 @@ export class MetaApiExecutor implements Executor {
 
     const opts = {
       comment: comment ?? "VouchFX",
-      clientId: clientOrderId,
+      clientId: toMetaApiClientId(clientOrderId),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

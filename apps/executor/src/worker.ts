@@ -899,10 +899,22 @@ async function executeNewSignal(
   // can display them without making MetaApi calls from Vercel serverless.
   await cacheBalanceInDb(db, brokerConnectionId, accountBalance, accountEquity, accountMode);
 
-  // For MARKET orders the entry price is unknown until fill; use first parsed
-  // entry if available, otherwise use the symbol's tick size as a safe proxy
-  // for computing SL distance (will be slightly imprecise but conservative).
-  const gatePriceRef = entryPrice ?? accountBalance; // fallback: any positive finite
+  // Price reference for SL-distance sizing. Market orders with no stated
+  // entry use the live quote — sizing from any other number produces garbage
+  // volume (a balance-as-price fallback shipped $10M dollarRisk in prod).
+  // No quote available → skip-with-reason; never size from a fabricated price.
+  let gatePriceRef = entryPrice;
+  if (gatePriceRef == null) {
+    try {
+      const quote = await executor.getSymbolPrice(resolvedSymbol, brokerConn);
+      gatePriceRef = effSide === "BUY" ? quote.ask : quote.bid;
+    } catch (err) {
+      const reason = `no_price_reference: ${(err as Error).message}`;
+      console.log(`${tag} skipped: ${reason}`);
+      await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, symbol: parsed.symbol } });
+      return;
+    }
+  }
 
   const gateResult = gateAndSize({
     sl: effSl,
@@ -999,7 +1011,9 @@ async function executeNewSignal(
 
       console.log(`${tag} leg ${i} filled: broker_id=${brokerId} price=${fillPrice}`);
     } catch (err) {
-      const errMsg = String(err);
+      // MetaApi ValidationError carries the offending fields in .details
+      const details = (err as { details?: unknown }).details;
+      const errMsg = String(err) + (details !== undefined ? ` — ${JSON.stringify(details)}` : "");
       console.error(`${tag} leg ${i} placement failed:`, errMsg);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (db as any).from("trades").update({ status: "SKIPPED", skip_reason: errMsg }).eq("id", tradeId);

@@ -67,6 +67,12 @@ export interface Executor {
   getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number>;
   /** Fetch broker symbol specification needed by the risk engine. */
   getSymbolSpec(symbol: string, conn: BrokerConnection): Promise<SymbolSpec>;
+  /**
+   * Current bid/ask quote. Price reference for sizing market orders that
+   * state no entry price. Throws if no quote is available — callers must
+   * skip-with-reason rather than size from a fabricated price.
+   */
+  getSymbolPrice(symbol: string, conn: BrokerConnection): Promise<{ bid: number; ask: number }>;
   /** Resolve broker-specific symbol suffix/gold-format. Returns null if unavailable. */
   resolveSymbol(raw: string, conn: BrokerConnection): Promise<string | null>;
   placeOrder(req: OrderRequest): Promise<OrderResult>;
