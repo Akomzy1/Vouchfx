@@ -225,7 +225,7 @@ App navigation: left sidebar (Dashboard, Channels, Signals, Risk, Billing, Refer
 - Clear, confident, plain-spoken. Short labels. No hype.
 - Lead with control and transparency: "signals you choose", "see exactly what happened and why".
 - Always include the disclaimer where relevant: *"VouchFX is an execution tool you control. It does not provide financial advice or guarantee outcomes. Trading involves risk."*
-- Approved rule-monitor marketing copy (landing band, Funded plan): headline "Prop firm changed the rules? We already know." — body emphasises "detected, human-verified, and live in your guardrails" and the "last verified" stamp. Never claim instant/unsupervised AI enforcement; the human-verification step is marketed as a trust feature.
+- Approved rule-monitor marketing copy (landing band, Funded plan): headline "Prop firm changed the rules? We already know." — body emphasises "detected, human-verified, and live in your guardrails" and the "last verified" stamp, PLUS a separate line that VouchFX also tracks the economic calendar (NFP/CPI/rate decisions) to stand trades down inside the firm's news window automatically. Keep the two distinct: the AI agent monitors the firm's RULES (incl. its news restriction policy); the economic-calendar feed monitors the EVENTS. Never claim instant/unsupervised AI enforcement; the human-verification step is marketed as a trust feature.
 
 ---
 

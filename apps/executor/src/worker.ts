@@ -20,6 +20,7 @@ import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CONFIDENCE_THRESHOLD, MODELS, env } from "@vouchfx/config";
 import { MetaApiExecutor } from "@vouchfx/core/executor";
+import { createPushSender } from "@vouchfx/core/push";
 import {
   parseSignalWithEscalation,
   gateAndSize,
@@ -183,10 +184,18 @@ async function lookupBrokerConn(
   return { metaApiAccountId, platform };
 }
 
+const VAPID = {
+  publicKey: env.VAPID_PUBLIC_KEY,
+  privateKey: env.VAPID_PRIVATE_KEY,
+  subject: env.VAPID_SUBJECT,
+};
+
 /**
  * Fire-and-forget notification helper.
  * Fetches the user's email then calls notify(). Errors are silently swallowed
- * so notification failures never block the execution path.
+ * so notification failures never block the execution path. Push is delivered as
+ * a third channel (alongside in-app + email) when VAPID is configured —
+ * createPushSender returns null otherwise, so notify() just skips it.
  */
 function notifyAsync(
   db: TypedClient,
@@ -210,6 +219,7 @@ function notifyAsync(
         title,
         body,
         resendApiKey: env.RESEND_API_KEY ?? null,
+        pushSender: createPushSender(db as Parameters<typeof createPushSender>[0], VAPID),
       });
     })
     .catch(() => undefined);

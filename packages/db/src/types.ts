@@ -256,9 +256,24 @@ export interface NotificationPreferenceRow {
   event_type: string;
   email_enabled: boolean;
   in_app_enabled: boolean;
+  push_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
+
+export interface PushSubscriptionRow {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export type PushSubscriptionInsert = Omit<PushSubscriptionRow, "id" | "created_at"> &
+  Partial<Pick<PushSubscriptionRow, "id" | "created_at">>;
 
 export interface NotificationRow {
   id: string;
@@ -554,6 +569,11 @@ export interface Database {
         Row: CalendarFetchLogRow;
         Insert: CalendarFetchLogInsert;
         Update: Partial<CalendarFetchLogInsert>;
+      } & NoRelationships;
+      push_subscriptions: {
+        Row: PushSubscriptionRow;
+        Insert: PushSubscriptionInsert;
+        Update: Partial<PushSubscriptionInsert>;
       } & NoRelationships;
     };
     Views: Record<string, never>;

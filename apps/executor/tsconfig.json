@@ -11,6 +11,7 @@
       "@vouchfx/core": ["../../packages/core/src/index.ts"],
       "@vouchfx/core/executor": ["../../packages/core/src/executor/index.ts"],
       "@vouchfx/core/monitoring": ["../../packages/core/src/monitoring/index.ts"],
+      "@vouchfx/core/push": ["../../packages/core/src/push/index.ts"],
       "@vouchfx/db": ["../../packages/db/src/index.ts"]
     }
   },

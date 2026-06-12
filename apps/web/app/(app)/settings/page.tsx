@@ -7,6 +7,7 @@ import BrokerConnections, {
   type BrokerConnectionRow,
 } from "@/components/broker/BrokerConnections";
 import NotificationPreferences from "@/components/notifications/NotificationPreferences";
+import PushManager from "@/components/notifications/PushManager";
 import ProfileName from "@/components/settings/ProfileName";
 import { NOTIFY_EVENTS } from "@vouchfx/core";
 
@@ -30,19 +31,20 @@ export default async function SettingsPage() {
       .order("created_at", { ascending: false }),
     db
       .from("notification_preferences")
-      .select("event_type, email_enabled, in_app_enabled")
+      .select("event_type, email_enabled, in_app_enabled, push_enabled")
       .eq("user_id", user.id),
   ]);
 
   // Build full preferences list (defaults for missing rows)
   const rowMap = new Map(
-    ((notifPrefs ?? []) as { event_type: string; email_enabled: boolean; in_app_enabled: boolean }[])
+    ((notifPrefs ?? []) as { event_type: string; email_enabled: boolean; in_app_enabled: boolean; push_enabled: boolean }[])
       .map((r) => [r.event_type, r])
   );
   const initialPrefs = NOTIFY_EVENTS.map((event) => ({
     event_type:    event as typeof NOTIFY_EVENTS[number],
     email_enabled:  rowMap.get(event)?.email_enabled  ?? true,
     in_app_enabled: rowMap.get(event)?.in_app_enabled ?? true,
+    push_enabled:   rowMap.get(event)?.push_enabled   ?? true,
   }));
 
   return (
@@ -123,6 +125,7 @@ export default async function SettingsPage() {
           </p>
           <p className="text-xs text-text-muted">Choose which events trigger alerts.</p>
         </div>
+        <PushManager />
         <NotificationPreferences initial={initialPrefs} />
       </div>
 

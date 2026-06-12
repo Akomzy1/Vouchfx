@@ -19,6 +19,7 @@
       "@/*": ["./*"],
       "@vouchfx/config": ["../../packages/config/src/index.ts"],
       "@vouchfx/core": ["../../packages/core/src/index.ts"],
+      "@vouchfx/core/push": ["../../packages/core/src/push/index.ts"],
       "@vouchfx/db": ["../../packages/db/src/index.ts"]
     }
   },

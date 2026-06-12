@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Loader2, AlertCircle, Mail, Bell } from "lucide-react";
+import { Loader2, AlertCircle, Mail, Bell, Smartphone } from "lucide-react";
 import { NOTIFY_EVENT_META, type NotifyEventType } from "@vouchfx/core";
 
 interface Pref {
   event_type: NotifyEventType;
   email_enabled: boolean;
   in_app_enabled: boolean;
+  push_enabled: boolean;
 }
 
 export default function NotificationPreferences({ initial }: { initial: Pref[] }) {
@@ -17,7 +18,7 @@ export default function NotificationPreferences({ initial }: { initial: Pref[] }
 
   const toggle = useCallback(async (
     eventType: NotifyEventType,
-    field: "email_enabled" | "in_app_enabled",
+    field: "email_enabled" | "in_app_enabled" | "push_enabled",
     value: boolean
   ) => {
     const key = `${eventType}:${field}`;
@@ -47,9 +48,10 @@ export default function NotificationPreferences({ initial }: { initial: Pref[] }
       {/* Header row */}
       <div className="flex items-center gap-3 px-4 py-2">
         <div className="flex-1" />
-        <div className="flex items-center gap-6 text-xs text-text-muted w-24 justify-end">
+        <div className="flex items-center gap-6 text-xs text-text-muted w-36 justify-end">
           <span className="flex items-center gap-1"><Bell size={11} /> In-app</span>
           <span className="flex items-center gap-1"><Mail size={11} /> Email</span>
+          <span className="flex items-center gap-1"><Smartphone size={11} /> Push</span>
         </div>
       </div>
 
@@ -64,7 +66,7 @@ export default function NotificationPreferences({ initial }: { initial: Pref[] }
               <p className="text-sm font-medium text-text-primary">{meta.title}</p>
               <p className="text-xs text-text-muted">{meta.description}</p>
             </div>
-            <div className="flex items-center gap-6 w-24 justify-end">
+            <div className="flex items-center gap-6 w-36 justify-end">
               <Toggle
                 checked={pref.in_app_enabled}
                 busy={saving === `${pref.event_type}:in_app_enabled`}
@@ -76,6 +78,12 @@ export default function NotificationPreferences({ initial }: { initial: Pref[] }
                 busy={saving === `${pref.event_type}:email_enabled`}
                 onChange={(v) => toggle(pref.event_type, "email_enabled", v)}
                 label="Email"
+              />
+              <Toggle
+                checked={pref.push_enabled}
+                busy={saving === `${pref.event_type}:push_enabled`}
+                onChange={(v) => toggle(pref.event_type, "push_enabled", v)}
+                label="Push"
               />
             </div>
           </div>

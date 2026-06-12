@@ -4,6 +4,16 @@ import type { NotifyEventType } from "./types";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDb = { from(table: string): any };
 
+/**
+ * Web Push channel, injected by the caller. Defined as a plain function type so
+ * notify() (which is in the client-safe core barrel) never imports the Node-only
+ * push crypto. Build it with createPushSender() from "@vouchfx/core/push".
+ */
+export type PushSender = (
+  userId: string,
+  payload: { title: string; body?: string; event: NotifyEventType; url?: string }
+) => Promise<void>;
+
 export interface NotifyParams {
   userId: string;
   toEmail?: string | null;
@@ -12,25 +22,28 @@ export interface NotifyParams {
   body?: string;
   resendApiKey?: string | null;
   fromEmail?: string;
+  /** Optional push channel. When absent, push is skipped (in-app + email only). */
+  pushSender?: PushSender | null;
 }
 
 export async function notify(db: AnyDb, params: NotifyParams): Promise<void> {
   const {
     userId, toEmail, event, title, body,
-    resendApiKey,
+    resendApiKey, pushSender,
     fromEmail = "VouchFX Alerts <alerts@mail.vouchfx.com>",
   } = params;
 
-  // 1. Check preferences — missing row means all notifications on
+  // 1. Check preferences — missing row means all channels on
   const { data: pref } = await db
     .from("notification_preferences")
-    .select("email_enabled, in_app_enabled")
+    .select("email_enabled, in_app_enabled, push_enabled")
     .eq("user_id", userId)
     .eq("event_type", event)
     .maybeSingle();
 
   const inAppEnabled: boolean = pref?.in_app_enabled ?? true;
   const emailEnabled: boolean = pref?.email_enabled  ?? true;
+  const pushEnabled:  boolean = pref?.push_enabled   ?? true;
 
   // 2. In-app notification (insert into notifications table)
   if (inAppEnabled) {
@@ -39,7 +52,12 @@ export async function notify(db: AnyDb, params: NotifyParams): Promise<void> {
       .insert({ user_id: userId, event_type: event, title, body: body ?? null });
   }
 
-  // 3. Email via Resend — fire-and-forget, non-fatal
+  // 3. Web Push — third channel; same per-event toggle. Non-fatal.
+  if (pushEnabled && pushSender) {
+    pushSender(userId, { title, body, event }).catch(() => undefined);
+  }
+
+  // 4. Email via Resend — fire-and-forget, non-fatal
   if (emailEnabled && resendApiKey && toEmail) {
     fetch("https://api.resend.com/emails", {
       method: "POST",

@@ -42,6 +42,12 @@ const envSchema = z.object({
   // Resend — transactional email
   RESEND_API_KEY: z.string().optional(),
 
+  // Web Push (VAPID) — PWA push notifications. Generate once with the helper in
+  // @vouchfx/core/push (generateVapidKeys). Push is skipped when these are absent.
+  VAPID_PUBLIC_KEY: z.string().optional(),   // also exposed to the browser via NEXT_PUBLIC_VAPID_PUBLIC_KEY
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),      // "mailto:alerts@vouchfx.com" or the site URL
+
   // Stripe — global billing (PRD R10: must bill via non-Nigerian entity — UK Ltd or US LLC)
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),

@@ -59,7 +59,7 @@ The cleanest, most reliable, most transparent Telegram→MT5 copier on the marke
 - N3 — No provider-side broadcasting tools (one provider → many subscribers).
 - N4 — No managed accounts, pooled funds, or discretionary allocation by VouchFX.
 - N5 — No financial advice, signal recommendations, or "expected profit" displays.
-- N6 — No native mobile apps (responsive web + PWA only in v1.0).
+- N6 — No native mobile apps (responsive web + an installable PWA shell with push — §6.13 — in v1.0; no offline/caching, no app-store native apps).
 - N7 — No platforms beyond MT5 at MVP (cTrader/Deriv/DXTrade/TradeLocker are post-MVP).
 
 ---
@@ -202,6 +202,19 @@ Priority key (MoSCoW): **M** = Must (MVP), **S** = Should (MVP if time allows), 
 |---|---|---|---|
 | VCH-NOT-01 | In-app + email alerts: broker disconnect, daily-loss-cap hit, Telegram session limited, trade opened/closed (configurable) | M | Alerts fire for the selected events |
 | VCH-NOT-02 | Telegram DM notifications (optional) | C | User can opt into VouchFX DM alerts |
+
+### 6.13 PWA shell (installable + push)
+
+A **light** PWA: installable to home screen + web push for the existing notification events. Offline/caching is explicitly out of scope (the product runs on always-on server workers; the device is a dashboard, so offline buys little).
+
+| ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| VCH-PWA-01 | Web app manifest + icon set + theme colors, making the app installable ("Add to home screen") on Android, iOS, and desktop | S | The app passes installability checks and can be added to the home screen with the VouchFX icon and dark theme |
+| VCH-PWA-02 | Minimal service worker for installability + push only — **no offline caching of app data or routes** | S | A service worker registers and enables install + push; it does not cache API responses or trades data |
+| VCH-PWA-03 | Web push notifications for the `VCH-NOT-01` events (trade opened/closed, broker disconnect, daily-loss-cap hit, Telegram session limited) — user opt-in, permission requested in-context (not on first load) | S | A subscribed user receives a push for each enabled event; push respects the same per-event toggles as in-app/email |
+| VCH-PWA-04 | Push subscription management: store/refresh subscriptions per device, allow disabling push per device, handle iOS PWA constraints (push works only once installed to home screen) | S | Subscriptions persist and can be revoked; iOS users are guided to install first if they enable push |
+
+Note: web push shares the `VCH-NOT-01` event model and toggles — it is a third delivery channel alongside in-app and email, not a separate notification system.
 
 ### 6.9 Billing & subscriptions
 
