@@ -144,7 +144,7 @@ Implement the gate order from the risk-engine skill: daily signal limit global +
 
 ## Prompt P1.16 — Drawdown guardian + SL policy + trade mgmt
 ```
-Add daily loss cap → pause + optional close-all (VCH-RSK-03), default-SL policy apply/skip/ask (VCH-RSK-04), breakeven-after-TP1 and trailing-after-TP2 (VCH-RSK-05), and news filter (VCH-RSK-06). All decisions written to audit_events.
+Add daily loss cap → pause + optional close-all (VCH-RSK-03), default-SL policy apply/skip/ask (VCH-RSK-04), breakeven-after-TP1 and trailing-after-TP2 (VCH-RSK-05), and news filter (VCH-RSK-06) backed by the calendar pipeline (VCH-RSK-06b/06c): a scheduled worker fetches the JBlanked News API (free tier — strictly ONE request/day) and normalises events into a Postgres calendar_events cache (event, currency, UTC timestamp converted at ingest, impact enum); the filter reads only the cache. Fallback: Forex Factory weekly JSON (nfs.faireconomy.media, ≤2 fetches/5min, detect the "Request Denied" HTML response) when the cache is stale >48h; on dual failure, prop accounts fail safe (block typical high-impact windows) and ops is alerted. Unit-test timezone conversion around DST boundaries. All decisions written to audit_events.
 ```
 
 ## Prompt P1.16b — Execution Mode (mirror vs apply-my-rules)
@@ -166,7 +166,7 @@ Build the signal-detail/audit view (VCH-DSH-02, 03): raw message → parsed fiel
 
 ## Prompt P1.19 — Channels + risk settings UI
 ```
-Build the Channels management UI (list, toggles, status Live/Demo-first/Paused, per-channel daily signal limit, kill switch, overrides) and the global Risk settings UI (Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, sizing, daily limits, drawdown guardian, default-SL policy, breakeven/trailing, news filter) with sensible defaults and helper text. Sticky Save.
+Build the Channels management UI (list, toggles, status Live/Paused, per-channel daily signal limit, kill switch, overrides) and the global Risk settings UI (Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, sizing, daily limits, drawdown guardian, default-SL policy, breakeven/trailing, news filter) with sensible defaults and helper text. Sticky Save.
 ```
 
 ## Prompt P1.20 — Notifications
@@ -200,12 +200,12 @@ Build Referral & affiliate (PRD §6.11, all M items): unique links/codes, last-t
 
 ## Prompt P1.25 — Onboarding wizard
 ```
-Stitch the 5-step onboarding wizard (VCH-ONB-01): Connect Telegram (+ optional referral code field) → Choose channels → Connect broker → Set risk (incl. Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, and daily signal limit) → Go live (with demo-first option and the required risk-disclaimer checkbox, VCH-ONB-02). Resumable, ≤90s active time.
+Stitch the 5-step onboarding wizard (VCH-ONB-01): Connect Telegram (+ optional referral code field) → Choose channels → Connect broker → Set risk (incl. Execution Mode mirror/apply with mirror lot sub-choice + no-SL acknowledgement, and daily signal limit) → Go live (summary + the required risk-disclaimer checkbox, VCH-ONB-02; the broker-connect step notes a demo account can be connected for testing). Resumable, ≤90s active time.
 ```
 
-## Prompt P1.26 — Demo-first mode
+## Prompt P1.26 — REMOVED (demo-first mode)
 ```
-Implement demo-first mode (VCH-DSH-05): a newly added channel runs on a paper/demo account for N days before going live; user can promote to live. Reuse the executor against a demo account; clearly label simulated trades.
+Demo-first mode was removed by product decision (PRD R6). VouchFX treats demo and live MT5 accounts identically; users test by connecting their broker's demo account. If demo-first code exists from an earlier build, remove it: drop demo_until/demo-first channel states, demo-account routing, and "Demo-first" status pills; add a short note to the broker-connect UI ("Want to test first? Connect your broker's free demo account — VouchFX works identically on demo and live"). Show account type (demo/live) as a badge on the broker connection, derived from MetaApi account info, so users always know which they're trading on.
 ```
 
 ## Prompt P1.27 — Admin/ops + monitoring
@@ -221,7 +221,7 @@ Final MVP hardening: verify no Telegram-session write paths exist; verify creden
 ---
 
 ## Notes
-- **Demo-first (P1.26) and news filter (in P1.16)** are PRD **S**-priority — include in MVP if time allows, otherwise defer to immediately post-launch without breaking the sequence.
+- **News filter (in P1.16)** is PRD **S**-priority — include in MVP if time allows, otherwise defer to immediately post-launch. Demo-first was removed by decision (see P1.26).
 - Resolve PRD §14 open questions before the prompts they touch: **R5** (default-SL default) before P1.16; **R10** (billing entity) before P1.21; **R9** (commission structure) before P1.24; **R8** (model pins) is already set in CLAUDE.md.
 - After Phase 1: **Phase 2 (MT5-only)** adds the **Prop Mode rule engine (PRD §6.12)**: the versioned firm rule library, per-account rule profiles, the real-time equity guardian, the consistency manager, firm-tuned news/weekend handling, stealth execution, and pre-trade rule simulation — plus Stripe + Stripe Tax, the Lifetime SKU, the referral/affiliate program, and vision/parsing hardening. On MT5 this reaches MT5-based prop firms only. **Phase 3** adds multi-platform (cTrader Open API, DXTrade, TradeLocker, Deriv — new Executor implementations behind the existing interface), which extends Prop Mode to non-MT5 firms, plus the self-hosted MT5-on-Wine execution backend. The Prop Mode rule engine is platform-agnostic logic, so building it on MT5 now is not wasted — it lights up for more firms once multi-platform lands.
 
@@ -265,7 +265,7 @@ Implement the consistency manager (VCH-PROP-05): track per-day realised profit a
 
 ## Prompt P2.7 — Firm-tuned news, weekend, min-days
 ```
-Wire the firm's exact news window into the news filter (skip/auto-flatten inside the window, VCH-PROP-06); auto-close positions before Friday close for firms banning weekend holding, and track min-trading-days progress (VCH-PROP-07). All actions logged.
+Wire the firm's exact news window into the news filter (skip/auto-flatten inside the window, VCH-PROP-06), reading events from the cached calendar_events pipeline (VCH-RSK-06b/06c — JBlanked daily pull, FF fallback, fail-safe blocking on prop accounts when stale); auto-close positions before Friday close for firms banning weekend holding, and track min-trading-days progress (VCH-PROP-07). All actions logged.
 ```
 
 ## Prompt P2.8 — Stealth execution

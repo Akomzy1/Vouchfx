@@ -26,9 +26,24 @@ export interface WorkerHealthRow {
   healthy: boolean;
 }
 
+export interface CalendarFeedRow {
+  source: string;
+  last_success_at: string | null;
+  last_attempt_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+}
+
+export interface CalendarHealth {
+  feeds: CalendarFeedRow[];
+  newestEventFetchedAt: string | null;
+  stale: boolean;
+}
+
 interface Props {
   users: UserHealthRow[];
   workers: WorkerHealthRow[];
+  calendar?: CalendarHealth;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -60,7 +75,7 @@ function TgBadge({ status }: { status: string }) {
 
 // ─── AdminHealthClient ────────────────────────────────────────────────────────
 
-export default function AdminHealthClient({ users, workers }: Props) {
+export default function AdminHealthClient({ users, workers, calendar }: Props) {
   const router = useRouter();
   const [pausing, setPausing] = useState<Record<string, boolean>>({});
 
@@ -151,6 +166,60 @@ export default function AdminHealthClient({ users, workers }: Props) {
           </div>
         )}
       </section>
+
+      {/* Calendar feed health (VCH-RSK-06b) */}
+      {calendar && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-text-primary">Economic calendar</h2>
+          <div className="card overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+              {calendar.stale ? (
+                <AlertTriangle size={14} className="text-warning" />
+              ) : (
+                <CheckCircle2 size={14} className="text-profit" />
+              )}
+              <span className="text-xs font-medium text-text-secondary">
+                {calendar.stale
+                  ? "Cache stale (>48h) — fail-safe news blocks active for prop accounts"
+                  : `Cache fresh — newest events fetched ${tsAgo(calendar.newestEventFetchedAt)}`}
+              </span>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Source", "Last success", "Last attempt", "Last status"].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {calendar.feeds.map((f) => (
+                  <tr key={f.source} className="border-b border-border last:border-0">
+                    <td className="px-4 py-2.5 font-mono text-xs text-text-primary">{f.source}</td>
+                    <td className="px-4 py-2.5 text-xs text-text-muted">{tsAgo(f.last_success_at)}</td>
+                    <td className="px-4 py-2.5 text-xs text-text-muted">{tsAgo(f.last_attempt_at)}</td>
+                    <td className="px-4 py-2.5">
+                      {f.last_status === "success" ? (
+                        <span className="flex items-center gap-1 text-xs text-profit">
+                          <CheckCircle2 size={12} /> success
+                        </span>
+                      ) : f.last_status ? (
+                        <span className="flex items-center gap-1 text-xs text-warning" title={f.last_error ?? undefined}>
+                          <AlertTriangle size={12} /> {f.last_status}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-text-muted">never fetched</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Per-user health (VCH-ADM-01) */}
       <section className="space-y-3">

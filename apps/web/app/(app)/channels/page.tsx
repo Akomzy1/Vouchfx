@@ -28,14 +28,32 @@ export default async function ChannelsPage() {
   const connected = status === "active" || status === "limited";
 
   let initialSources: ChannelSource[] = [];
+  let globalRiskPct = 0.5;
+  let globalDailyLimit = 0;
+  let brokerLabel: string | null = null;
+
   if (connected) {
-    // Fetch sources (exclude those with a pending kill-close — executor is handling them)
-    const { data: sources } = await db
-      .from("signal_sources")
-      .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, demo_until, override_risk_enabled, override_risk_pct, created_at")
-      .eq("user_id", user.id)
-      .is("kill_close_requested_at", null)
-      .order("created_at", { ascending: false });
+    const [{ data: sources }, { data: riskRow }, { data: broker }] = await Promise.all([
+      // Exclude sources with a pending kill-close — executor is handling them
+      db.from("signal_sources")
+        .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, override_risk_enabled, override_risk_pct, sl_policy, reverse_trades, created_at")
+        .eq("user_id", user.id)
+        .is("kill_close_requested_at", null)
+        .order("created_at", { ascending: false }),
+      db.from("risk_settings")
+        .select("risk_per_trade_pct, daily_signal_limit")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      db.from("broker_connections")
+        .select("label, platform")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    globalRiskPct = (riskRow as { risk_per_trade_pct?: number } | null)?.risk_per_trade_pct ?? 0.5;
+    globalDailyLimit = (riskRow as { daily_signal_limit?: number } | null)?.daily_signal_limit ?? 0;
+    brokerLabel = (broker as { label: string | null } | null)?.label ?? null;
 
     if (sources && sources.length > 0) {
       // Count today's signals per source
@@ -45,6 +63,7 @@ export default async function ChannelsPage() {
       const { data: counts } = await db
         .from("parsed_signals")
         .select("source_id")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .in("source_id", (sources as any[]).map((s: any) => s.id))
         .eq("is_signal", true)
         .gte("created_at", today.toISOString());
@@ -54,33 +73,40 @@ export default async function ChannelsPage() {
         signalCounts.set(row.source_id, (signalCounts.get(row.source_id) ?? 0) + 1);
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       initialSources = (sources as any[]).map((s: any) => ({
-        id:                   s.id,
-        telegram_chat_id:     String(s.telegram_chat_id),
-        title:                s.title,
-        is_enabled:           s.is_enabled,
-        daily_signal_limit:   s.daily_signal_limit,
-        demo_until:           s.demo_until,
+        id:                    s.id,
+        telegram_chat_id:      String(s.telegram_chat_id),
+        title:                 s.title,
+        is_enabled:            s.is_enabled,
+        daily_signal_limit:    s.daily_signal_limit,
         override_risk_enabled: s.override_risk_enabled ?? false,
-        override_risk_pct:    s.override_risk_pct ?? null,
-        signals_today:        signalCounts.get(s.id) ?? 0,
+        override_risk_pct:     s.override_risk_pct ?? null,
+        sl_policy:             s.sl_policy ?? null,
+        reverse_trades:        s.reverse_trades ?? false,
+        signals_today:         signalCounts.get(s.id) ?? 0,
       }));
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Channels</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Manage the Telegram channels you copy signals from.
+    <div>
+      <div className="mb-5">
+        <h1 className="text-[20px] font-bold tracking-tight text-text-primary sm:text-[22px]">Channels</h1>
+        <p className="mt-0.5 text-[13px] text-text-secondary">
+          Telegram channels VouchFX is copying onto your MT5 account. Override risk per channel or pause any in one tap.
         </p>
       </div>
 
       <ConnectFlow initialStatus={status} lastConnectedAt={lastConnectedAt} />
 
       {connected && (
-        <ChannelList initialSources={initialSources} />
+        <ChannelList
+          initialSources={initialSources}
+          globalRiskPct={globalRiskPct}
+          globalDailyLimit={globalDailyLimit}
+          brokerLabel={brokerLabel}
+        />
       )}
     </div>
   );

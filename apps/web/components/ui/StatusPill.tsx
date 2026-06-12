@@ -1,4 +1,4 @@
-type Status = "live" | "connected" | "paused" | "demo" | "disconnected" | "error" | "pending";
+type Status = "live" | "connected" | "paused" | "disconnected" | "error" | "pending";
 
 interface StatusPillProps {
   status: Status;
@@ -9,7 +9,6 @@ const STYLES: Record<Status, { pill: string; dot: string; defaultLabel: string }
   live:          { pill: "pill-connected", dot: "bg-profit",   defaultLabel: "Live" },
   connected:     { pill: "pill-connected", dot: "bg-profit",   defaultLabel: "Connected" },
   paused:        { pill: "pill-paused",    dot: "bg-warning",  defaultLabel: "Paused" },
-  demo:          { pill: "pill-paused",    dot: "bg-warning",  defaultLabel: "Demo-first" },
   disconnected:  { pill: "pill-error",     dot: "bg-loss",     defaultLabel: "Disconnected" },
   error:         { pill: "pill-error",     dot: "bg-loss",     defaultLabel: "Error" },
   pending:       { pill: "pill-paused",    dot: "bg-warning",  defaultLabel: "Pending" },

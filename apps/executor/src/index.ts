@@ -1,7 +1,7 @@
 /**
  * Executor entry point.
  *
- * Starts a BullMQ Worker that consumes "vouchfx:signals" jobs produced by the
+ * Starts a BullMQ Worker that consumes "vouchfx-signals" jobs produced by the
  * listener. MetaApi account IDs are looked up per-job from broker_connections —
  * no hardcoded spike account is needed.
  *
@@ -12,6 +12,8 @@
  * Run:  pnpm --filter @vouchfx/executor dev
  */
 
+// MUST be first: loads .env before @vouchfx/config's parseEnv() singleton runs.
+import "./load-env";
 import http from "http";
 import Anthropic from "@anthropic-ai/sdk";
 import Redis from "ioredis";
@@ -22,6 +24,7 @@ import { initSentry, captureException, startHeartbeat } from "@vouchfx/core/moni
 import { createAdminClientFromEnv } from "@vouchfx/db";
 import { createWorker } from "./worker";
 import { startRuleMonitorSchedule } from "./rule-monitor";
+import { startCalendarSchedule } from "./calendar";
 
 const env = parseEnv();
 const log = createLogger("executor");
@@ -93,6 +96,18 @@ const stopRuleMonitor = startRuleMonitorSchedule(
   ruleMonitorInterval,
 );
 
+// ── Economic-calendar sync (VCH-RSK-06b/06c) ─────────────────────────────────
+// Hourly tick; the actual fetches are rate-guarded via calendar_fetch_log
+// (JBlanked: 1 request/day; ForexFactory fallback: only when cache >48h stale,
+// ≤1 request per 5 minutes). Fail-safe transitions alert ADMIN_EMAILS.
+const stopCalendar = startCalendarSchedule({
+  db,
+  log,
+  jblankedApiKey: env.JBLANKED_API_KEY ?? null,
+  resendApiKey: env.RESEND_API_KEY ?? null,
+  adminEmails: env.ADMIN_EMAILS ?? null,
+});
+
 worker.on("completed", (job) => {
   log.info("job completed", { jobId: job.id });
 });
@@ -129,12 +144,15 @@ async function processKillCloseRequests(): Promise<void> {
   for (const src of sources as { id: string; user_id: string; telegram_chat_id: string }[]) {
     const tag = `[kill-close ${src.id.slice(0, 8)}]`;
     try {
-      // Find the user's active broker connection
+      // Find the user's primary active broker connection (oldest active as
+      // the deterministic fallback) — matches the listener's routing order.
       const { data: connRow } = await dbAny
         .from("broker_connections")
         .select("id, metaapi_account_id, platform")
         .eq("user_id", src.user_id)
         .eq("is_active", true)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true })
         .limit(1)
         .single();
 
@@ -202,6 +220,7 @@ async function shutdown(): Promise<void> {
   log.info("shutting down");
   stopHeartbeat?.();
   stopRuleMonitor();
+  stopCalendar();
   clearInterval(heartbeatTimer);
   clearInterval(killPollTimer);
   await worker.close();

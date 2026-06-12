@@ -147,8 +147,13 @@ describe("symbolCurrencies", () => {
     expect(symbolCurrencies("XAUUSD")).toEqual(["XAU", "USD"]);
   });
 
-  it("returns [] for index symbols", () => {
-    expect(symbolCurrencies("US30")).toEqual([]);
-    expect(symbolCurrencies("NAS100")).toEqual([]);
+  it("maps index symbols to their calendar currency (USD news moves US30)", () => {
+    expect(symbolCurrencies("US30")).toEqual(["USD"]);
+    expect(symbolCurrencies("NAS100")).toEqual(["USD"]);
+    expect(symbolCurrencies("GER40")).toEqual(["EUR"]);
+  });
+
+  it("returns [] for unknown synthetics", () => {
+    expect(symbolCurrencies("VOLATILITY75")).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * BullMQ worker — consumes "vouchfx:signals" jobs.
+ * BullMQ worker — consumes "vouchfx-signals" jobs.
  *
  * Pipeline per job:
  *   received → parse (Claude) → gate → upsert parsed_signal
@@ -27,6 +27,7 @@ import {
   notify,
   canExecute,
   getEntitlements,
+  createLogger,
   type BrokerConnection,
   type OrderRequest,
   type TradeRef,
@@ -45,6 +46,9 @@ import {
   type TradeInsert,
   type TradeRow,
 } from "@vouchfx/db";
+import { checkNewsFilterGate } from "./calendar";
+
+const workerLog = createLogger("executor:worker");
 
 /** Map DB risk_settings row to the risk engine's RiskSettings shape. */
 function dbRowToRiskSettings(
@@ -83,7 +87,7 @@ function dbRowToRiskSettings(
   };
 }
 
-const QUEUE_NAME = "vouchfx:signals";
+const QUEUE_NAME = "vouchfx-signals";
 
 export interface WorkerDeps {
   db: TypedClient;
@@ -216,7 +220,8 @@ async function cacheBalanceInDb(
   db: TypedClient,
   brokerConnectionId: string,
   balance: number,
-  equity: number
+  equity: number,
+  accountMode: "demo" | "live" | null = null
 ): Promise<void> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,6 +231,7 @@ async function cacheBalanceInDb(
         last_balance_usd: balance,
         last_equity_usd: equity,
         last_synced_at: new Date().toISOString(),
+        ...(accountMode ? { account_mode: accountMode } : {}),
       })
       .eq("id", brokerConnectionId);
   } catch {
@@ -726,6 +732,16 @@ async function applyBreakevenOpportunities(
 
 // ── New-signal execution (multi-TP) ──────────────────────────────────────────
 
+/** Per-channel overrides resolved from signal_sources before execution. */
+interface SourceOverrides {
+  /** Channel risk-per-trade override (% of equity); null = use global. */
+  riskPct: number | null;
+  /** Channel no-SL policy; null = inherit global default_sl_policy. */
+  slPolicy: "require" | "apply_default" | null;
+  /** Flip BUY/SELL for this channel (SL/TP swapped). */
+  reverse: boolean;
+}
+
 async function executeNewSignal(
   tag: string,
   db: TypedClient,
@@ -738,12 +754,38 @@ async function executeNewSignal(
   sourceId: string,
   idempotencyKey: string,
   planSignalCap: number,  // 0 = unlimited; plan-level override for trial cap
-  isDemoMode: boolean     // channel is in demo/paper mode
+  overrides: SourceOverrides
 ): Promise<void> {
   if (!parsed.symbol || !parsed.side) {
     console.log(`${tag} skipped: symbol or side missing`);
     await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "missing_symbol_or_side" } });
     return;
+  }
+
+  // ── Per-channel reverse: flip side, swap SL/TP ───────────────────────────
+  // The original TP1 becomes the protective stop and the original SL becomes
+  // the take-profit, so the stop stays on the correct side of entry. Only
+  // price-unit SL/TP can be swapped safely — pip/percent offsets are
+  // direction-relative and would land on the wrong side.
+  let effSide: "BUY" | "SELL" = parsed.side;
+  let effSl: number | null = parsed.sl;
+  let effSlUnit: SlUnit = (parsed.sl_unit as SlUnit | null) ?? "price";
+  let effTps: number[] = parsed.tps;
+
+  if (overrides.reverse) {
+    const slUnitOk = !parsed.sl || (parsed.sl_unit ?? "price") === "price";
+    const tpUnitOk = parsed.tps.length === 0 || (parsed.tp_unit ?? "price") === "price";
+    if (!slUnitOk || !tpUnitOk) {
+      const reason = "reverse_unsupported_units";
+      console.log(`${tag} skipped: ${reason} (sl_unit=${parsed.sl_unit} tp_unit=${parsed.tp_unit})`);
+      await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, sl_unit: parsed.sl_unit, tp_unit: parsed.tp_unit } });
+      return;
+    }
+    effSide = parsed.side === "BUY" ? "SELL" : "BUY";
+    effSl = parsed.tps[0] ?? null;
+    effSlUnit = "price";
+    effTps = parsed.sl != null ? [parsed.sl] : [];
+    console.log(`${tag} reverse active: ${parsed.side}→${effSide}, SL=${effSl ?? "none"}, TPs=[${effTps.join(",")}]`);
   }
 
   // ── Idempotency pre-check ────────────────────────────────────────────────
@@ -769,9 +811,19 @@ async function executeNewSignal(
     .eq("user_id", userId)
     .maybeSingle();
 
-  const riskSettings: RiskSettings = rsRow
-    ? dbRowToRiskSettings(rsRow as Record<string, unknown>)
-    : DEFAULT_RISK_SETTINGS;
+  const riskSettings: RiskSettings = {
+    ...(rsRow ? dbRowToRiskSettings(rsRow as Record<string, unknown>) : DEFAULT_RISK_SETTINGS),
+  };
+
+  // Per-channel overrides (signal_sources): risk % and no-SL policy
+  if (overrides.riskPct !== null) {
+    riskSettings.riskPercent = overrides.riskPct;
+    console.log(`${tag} channel risk override: ${overrides.riskPct}%`);
+  }
+  if (overrides.slPolicy !== null) {
+    riskSettings.defaultSlPolicy = overrides.slPolicy === "require" ? "skip" : "apply_default";
+    console.log(`${tag} channel SL policy override: ${overrides.slPolicy}`);
+  }
 
   // Plan-level signal cap: trial = 1/day (system-locked, cannot be overridden by user settings)
   if (planSignalCap > 0) {
@@ -798,6 +850,21 @@ async function executeNewSignal(
     return; // audit event already written inside checkDrawdown
   }
 
+  // ── News filter (VCH-RSK-06b/06c) — reads the calendar cache ONLY ───────
+  const newsGate = await checkNewsFilterGate(
+    db, brokerConnectionId, parsed.symbol, riskSettings, workerLog
+  );
+  if (!newsGate.ok) {
+    console.log(`${tag} skipped by news filter: ${newsGate.reason}`);
+    await writeAuditEvent(db, {
+      userId,
+      eventType: "skipped",
+      parsedSignalId,
+      payload: { reason: newsGate.reason, symbol: parsed.symbol },
+    });
+    return;
+  }
+
   // ── Resolve broker symbol ────────────────────────────────────────────────
   const resolvedSymbol = await executor.resolveSymbol(parsed.symbol, brokerConn);
   if (!resolvedSymbol) {
@@ -810,29 +877,36 @@ async function executeNewSignal(
   // ── Resolve order type and entry price ──────────────────────────────────
   const parsedOrderType = parsed.order_type ?? "MARKET";
   const entryPrice: number | undefined = parsed.entries[0];
-  const orderType: "MARKET" | "LIMIT" | "STOP" =
+  let orderType: "MARKET" | "LIMIT" | "STOP" =
     parsedOrderType !== "MARKET" && entryPrice == null
       ? (console.warn(`${tag} ${parsedOrderType} order has no entry price — falling back to MARKET`), "MARKET")
       : (parsedOrderType as "MARKET" | "LIMIT" | "STOP");
 
-  const [{ balance: accountBalance, equity: accountEquity }, symbolSpec] = await Promise.all([
+  // Reversed pending orders flip semantics: a BUY LIMIT below market becomes a
+  // SELL at the same price below market, which brokers call a SELL STOP (and
+  // vice-versa). Swap LIMIT↔STOP so the pending order remains valid.
+  if (overrides.reverse && orderType !== "MARKET") {
+    orderType = orderType === "LIMIT" ? "STOP" : "LIMIT";
+    console.log(`${tag} reverse: pending order type flipped to ${orderType}`);
+  }
+
+  const [{ balance: accountBalance, equity: accountEquity, accountMode }, symbolSpec] = await Promise.all([
     executor.getAccountInfo(brokerConn),
     executor.getSymbolSpec(resolvedSymbol, brokerConn),
   ]);
 
-  // Write balance to broker_connections so the web dashboard can display it
-  // without making MetaApi calls from the Vercel serverless environment.
-  await cacheBalanceInDb(db, brokerConnectionId, accountBalance, accountEquity);
+  // Write balance + demo/live mode to broker_connections so the web dashboard
+  // can display them without making MetaApi calls from Vercel serverless.
+  await cacheBalanceInDb(db, brokerConnectionId, accountBalance, accountEquity, accountMode);
 
   // For MARKET orders the entry price is unknown until fill; use first parsed
   // entry if available, otherwise use the symbol's tick size as a safe proxy
   // for computing SL distance (will be slightly imprecise but conservative).
   const gatePriceRef = entryPrice ?? accountBalance; // fallback: any positive finite
-  const slUnit: SlUnit = (parsed.sl_unit as SlUnit | null) ?? "price";
 
   const gateResult = gateAndSize({
-    sl: parsed.sl,
-    slUnit,
+    sl: effSl,
+    slUnit: effSlUnit,
     entryPrice: gatePriceRef,
     accountBalance,
     settings: riskSettings,
@@ -846,7 +920,7 @@ async function executeNewSignal(
       userId,
       eventType: "skipped",
       parsedSignalId,
-      payload: { reason: `risk_gate:${gateResult.reason}`, sl: parsed.sl, sl_unit: parsed.sl_unit },
+      payload: { reason: `risk_gate:${gateResult.reason}`, sl: effSl, sl_unit: effSlUnit, reversed: overrides.reverse },
     });
     return;
   }
@@ -858,13 +932,9 @@ async function executeNewSignal(
   await applyBreakevenOpportunities(db, executor, userId, brokerConn, riskSettings, tag);
 
   // ── Build TP legs ────────────────────────────────────────────────────────
-  const tpLegs: (number | null)[] = parsed.tps.length > 0 ? parsed.tps : [null];
+  const tpLegs: (number | null)[] = effTps.length > 0 ? effTps : [null];
 
-  const modeLabel = isDemoMode ? "simulating" : "placing";
-  console.log(`${tag} ${modeLabel} ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}${isDemoMode ? " [DEMO]" : ""}`);
-
-  // In demo mode, use the signal's entry price as simulated fill (no live tick needed)
-  const simulatedPrice: number | null = isDemoMode ? (entryPrice ?? null) : null;
+  console.log(`${tag} placing ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}`);
 
   for (let i = 0; i < tpLegs.length; i++) {
     const tp = tpLegs[i];
@@ -875,13 +945,11 @@ async function executeNewSignal(
       parsed_signal_id:     parsedSignalId,
       broker_connection_id: brokerConnectionId,
       symbol:               parsed.symbol,
-      side:                 parsed.side,
+      side:                 effSide,
       volume:               legVolume,
-      sl:                   parsed.sl ?? undefined,
+      sl:                   effSl ?? undefined,
       tp:                   tp ?? undefined,
       status:               "PENDING",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(isDemoMode ? { is_simulated: true } as any : {}),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -898,26 +966,14 @@ async function executeNewSignal(
     const tradeId = (tradeRows as { id: string }[])[0]!.id;
     console.log(`${tag} leg ${i} trade created (id=${shortId(tradeId)} tp=${tp ?? "none"})`);
 
-    if (isDemoMode) {
-      // Paper trade — mark OPEN immediately with simulated fill price, no broker call
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (db as any).from("trades").update({
-        entry_price: simulatedPrice,
-        status:      "OPEN",
-        opened_at:   new Date().toISOString(),
-      }).eq("id", tradeId);
-      console.log(`${tag} leg ${i} simulated: price=${simulatedPrice ?? "unknown"}`);
-      continue;
-    }
-
     const req: OrderRequest = {
       connectionId: brokerConnectionId,
       symbol:       resolvedSymbol,
-      side:         parsed.side,
+      side:         effSide,
       orderType,
       volume:       legVolume,
       entryPrice,
-      sl:           parsed.sl ?? undefined,
+      sl:           effSl ?? undefined,
       tp:           tp ?? undefined,
       clientOrderId: legKey,
       comment:      "VouchFX",
@@ -957,20 +1013,22 @@ async function executeNewSignal(
     parsedSignalId,
     payload: {
       symbol: parsed.symbol,
-      side: parsed.side,
+      side: effSide,
       legs: tpLegs.length,
-      tps: parsed.tps,
-      sl: parsed.sl,
+      tps: effTps,
+      sl: effSl,
       resolved_symbol: resolvedSymbol,
       volume: legVolume,
       dollar_risk: gateResult.dollarRisk,
       account_balance: accountBalance,
+      ...(overrides.reverse ? { reversed: true, original_side: parsed.side } : {}),
+      ...(overrides.riskPct !== null ? { channel_risk_pct: overrides.riskPct } : {}),
     },
   });
 
   notifyAsync(
     db, userId, "trade_opened",
-    `${parsed.side} ${parsed.symbol} opened`,
+    `${effSide} ${parsed.symbol} opened${overrides.reverse ? " (reversed)" : ""}`,
     `${tpLegs.length} leg${tpLegs.length > 1 ? "s" : ""} · vol ${legVolume} · risk $${gateResult.dollarRisk.toFixed(2)}`
   );
 }
@@ -1217,11 +1275,15 @@ async function processJob(
     console.log(`${tag} parsed_signal already persisted (id=${shortId(parsedSignalId)})`);
   }
 
-  // ── 7. Broker connection + demo mode check ───────────────────────────────
+  // ── 7. Broker connection + per-channel settings ──────────────────────────
   const [brokerLookup, sourceResult] = await Promise.all([
     lookupBrokerConn(db, brokerConnectionId),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (db as any).from("signal_sources").select("demo_until").eq("id", sourceId).maybeSingle(),
+    (db as any)
+      .from("signal_sources")
+      .select("override_risk_enabled, override_risk_pct, sl_policy, reverse_trades")
+      .eq("id", sourceId)
+      .maybeSingle(),
   ]);
 
   const { metaApiAccountId, platform } = brokerLookup;
@@ -1233,8 +1295,21 @@ async function processJob(
   };
   executor.register(brokerConn);
 
-  const demoUntil = (sourceResult.data as { demo_until: string | null } | null)?.demo_until ?? null;
-  const isDemoMode = demoUntil !== null && new Date(demoUntil) > new Date();
+  const sourceRow = sourceResult.data as {
+    override_risk_enabled: boolean | null;
+    override_risk_pct: number | null;
+    sl_policy: "require" | "apply_default" | null;
+    reverse_trades: boolean | null;
+  } | null;
+
+  const sourceOverrides: SourceOverrides = {
+    riskPct:
+      sourceRow?.override_risk_enabled && typeof sourceRow.override_risk_pct === "number" && sourceRow.override_risk_pct > 0
+        ? sourceRow.override_risk_pct
+        : null,
+    slPolicy: sourceRow?.sl_policy ?? null,
+    reverse: sourceRow?.reverse_trades === true,
+  };
 
   // ── 8. Route: follow-up or new signal ────────────────────────────────────
   const followUpType = parsed.follow_up_type;
@@ -1242,7 +1317,7 @@ async function processJob(
   if (followUpType && followUpType !== "NEW_SIGNAL") {
     await dispatchFollowUp(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, sourceId);
   } else {
-    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, isDemoMode);
+    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, sourceOverrides);
   }
 }
 

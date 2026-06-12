@@ -4,7 +4,9 @@ const config: Config = {
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
-    "../../packages/**/*.{ts,tsx}",
+    "../../packages/core/src/**/*.{ts,tsx}",
+    "../../packages/db/src/**/*.{ts,tsx}",
+    "../../packages/config/src/**/*.{ts,tsx}",
   ],
   theme: {
     extend: {
@@ -15,6 +17,7 @@ const config: Config = {
         "surface-elevated": "#1B232D",
         border: "#222B36",
         primary: "#14B8A6",
+        "primary-light": "#2DD4BF",
         "text-primary": "#E6EDF3",
         "text-secondary": "#8B98A5",
         "text-muted": "#5B6772",

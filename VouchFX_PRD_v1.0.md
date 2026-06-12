@@ -38,7 +38,7 @@ The cleanest, most reliable, most transparent Telegram→MT5 copier on the marke
 2. Fully-managed execution — the user never touches MetaApi.
 3. Transparent audit log explaining every parse and trade decision.
 4. Clean, predictable USD pricing including a lifetime option.
-5. First-class risk controls (per-trade risk, daily loss cap, per-channel kill switch, demo-first mode).
+5. First-class risk controls (per-trade risk, daily loss cap, per-channel kill switch).
 6. Nigerian-built cost base enabling strong human support; naira checkout via Paystack.
 
 ---
@@ -85,7 +85,7 @@ Anti-persona (explicitly not designed for in v1.0): institutional/PAMM managers,
 3. **Select channels** — VouchFX lists every channel/group the user is in; user toggles which to copy.
 4. **Connect broker** — user enters MT5 server, login, and password (investor/trade password preferred where the broker supports trade-without-withdrawal). VouchFX validates the connection live.
 5. **Set risk** — choose Execution Mode (Mirror provider exactly / Apply my risk rules), risk-per-trade (default 0.5%), max trades/day, daily signal limit, news filter on/off. Accept the risk disclaimer.
-6. **Go live (or demo-first)** — user chooses to run new channels live immediately or in demo-first mode for N days.
+6. **Go live** — user reviews the summary and goes live. (Testing is the user's choice of connected account: VouchFX treats a broker demo account and a live account identically — users who want to test simply connect their broker's demo account first, then switch to or add their live account when ready. The broker-connect step says this explicitly.)
 
 ### 5.2 Steady-state loop (per signal)
 1. A message arrives in a selected channel.
@@ -177,6 +177,8 @@ Priority key (MoSCoW): **M** = Must (MVP), **S** = Should (MVP if time allows), 
 | VCH-RSK-04 | Default-SL policy when a signal omits SL (apply default / skip / ask) | M | User-selected policy is enforced consistently |
 | VCH-RSK-05 | Breakeven-after-TP1 and trailing-after-TP2 | S | SL moves to entry after TP1; trails after TP2 when enabled |
 | VCH-RSK-06 | News filter (skip high-impact event windows) | S | Trades within a configurable window around high-impact news are skipped with reason |
+| VCH-RSK-06b | Economic calendar feed: **JBlanked News API (free tier)** as primary source — ONE scheduled fetch per day (free tier limit: 1 request/day), normalised into a Postgres `calendar_events` cache (event, currency, UTC timestamp, impact); the news filter reads ONLY the cache, never the live feed | S | The daily fetch populates the cache; filter decisions query Postgres; the single daily request is never exceeded |
+| VCH-RSK-06c | Calendar fail-safe + fallback: if the cache is stale (>48h) or the daily fetch fails, fall back to the Forex Factory weekly JSON (`nfs.faireconomy.media`, max 2 fetches/5min, used sparingly); if both fail, prop-firm accounts fail SAFE (block trading in typical high-impact windows) and ops is alerted via Telegram/email | S | A stale cache triggers the fallback fetch; dual failure triggers conservative blocking on prop accounts + an ops alert; timestamps are converted to UTC at ingest and DST-tested |
 | VCH-RSK-07 | Stealth execution (randomised delay / hidden comment) for prop accounts | C | Optional delay and neutral order comment when enabled |
 | VCH-RSK-08 | Reverse-trade mode (invert side) per channel | C | When enabled, buy↔sell inverted for that channel |
 | VCH-RSK-09 | **Execution Mode** — "Mirror provider exactly" vs "Apply my risk rules", settable globally and per-channel (per-channel overrides global) | M | In Mirror mode, the provider's SL and TP prices are placed unchanged and no default-SL substitution, breakeven, or trailing is applied unless the user explicitly opts in; in Apply-my-rules mode the full risk engine governs (default) |
@@ -192,7 +194,7 @@ Priority key (MoSCoW): **M** = Must (MVP), **S** = Should (MVP if time allows), 
 | VCH-DSH-02 | Audit log per signal: raw message, parsed JSON, reasoning, action sent, broker response, PnL | M | Every signal is inspectable end-to-end |
 | VCH-DSH-03 | Trade event timeline (SL→BE, TP1 hit, partial close, pending-order cancelled, closed-by-signal) | M | Each event recorded with source message reference, including cancels triggered by a provider message or message-deletion |
 | VCH-DSH-04 | Filter/search history by channel, symbol, date, outcome | S | Returns correct subset |
-| VCH-DSH-05 | Demo-first mode: run a channel on a paper account for N days before live | S | New channel trades simulate on demo; user can promote to live |
+| VCH-DSH-05 | ~~Demo-first mode~~ — REMOVED by decision: VouchFX runs signals on whatever MT5 account the user connects (demo or live, treated identically). Testing = the user connects their broker's demo account. The broker-connect UI notes this option | W | The broker-connect step displays guidance that a demo account can be connected for testing; no separate demo-execution subsystem exists |
 
 ### 6.8 Notifications
 
@@ -320,6 +322,7 @@ Vercel serverless is **not** used for listeners or execution loops (no long-live
 | Stripe | Global billing (cards, subscriptions, Lifetime) | Requires a non-Nigerian billing entity (UK Ltd / US LLC); VAT/sales-tax handled via Stripe Tax + accountant (not Merchant-of-Record) |
 | Paystack | Nigeria billing | NGN settlement |
 | Resend | Email | Transactional notifications |
+| JBlanked News API (free) | Economic calendar for the news filter | Hard limit 1 request/day on free tier — daily cached pull only; indie single-dev service, no SLA; re-publishes FF/MQL5/FXStreet data (unofficial-source caveat); FF weekly JSON as fallback; fail-safe blocking on dual failure |
 
 ---
 
@@ -382,7 +385,7 @@ MVP = Phase 1 = all **M**-priority requirements above.
 | R3 | Confirm target brokers permit automated/EA trading (Exness, HFM, FXTM, Pepperstone, prop firms) | Client | Open |
 | R4 | Lifetime SKU long-tail COGS — confirm cap & migration right in ToS | Client | Open |
 | R5 | Default-SL policy default value (apply default vs skip) — product decision | Product owner | Open |
-| R6 | Demo-first mode in MVP or Phase 2? (currently **S**) | Product owner | Open |
+| R6 | Demo-first mode — **resolved: removed entirely.** Users test by connecting a broker demo account themselves; VouchFX treats demo and live MT5 accounts identically. Eliminates demo-slot plan-limit exceptions, MetaApi demo-account lifecycle costs, and channel→account routing complexity | Product owner | Resolved |
 | R7 | Disclaimer / ToS wording — "execution tool, user-controlled, no advice" framing | Client/legal | Open |
 | R8 | Which Anthropic models are pinned at build time (Haiku 4.5 / Sonnet 4.6 / Opus 4.8 assumed) | Build | Open |
 | R9 | Referral/affiliate commission is flat 20% recurring — confirm whether to keep flat, step down after 12 months, or restrict on Starter tier to protect margin (Starter gross margin is ~$10; 20% ≈ $3.80) | Client | Open |
@@ -433,7 +436,7 @@ These remain candidates for a later major version once the core copier is proven
 - **MetaApi** — cloud API that runs/controls MT4/MT5 terminals; how VouchFX executes trades.
 - **Executor interface** — internal abstraction so MT5, cTrader, Deriv, etc. share one execution contract.
 - **Idempotency key** — `(chat_id, message_id, edit_version)`; guarantees one signal → at most one trade.
-- **Demo-first mode** — running a new channel on a paper account before risking live funds.
+- *(Demo-first mode removed — testing is done by connecting a broker demo account, which VouchFX treats identically to live.)*
 - **Stealth execution** — randomised delay + neutral order comment to satisfy prop-firm rules.
 - **Consistency rule** — a prop-firm rule capping how much of total profit may come from a single day (typically 20–50%); breaching it can lock a payout even if all other rules pass.
 - **Trailing drawdown** — a max-loss floor that moves with profit; models differ: static (fixed), EOD trailing (moves once at day close), intraday trailing (tightens on every spike).

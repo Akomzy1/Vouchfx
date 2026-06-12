@@ -35,7 +35,7 @@ Mobile-first matters: assume many users are on phones.
 - **Execution** — placing the trade on the broker via the (invisible-to-user) execution layer.
 - **Audit log / signal detail** — the transparent record of a signal: raw message → parsed fields → reasoning → risk checks → broker action → live P&L. **This is VouchFX's key differentiator.**
 - **Daily signal limit** — a trader-set cap on how many signals VouchFX acts on per day (global and per-channel). After the cap, further signals are skipped with reason.
-- **Demo-first mode** — running a new channel on a paper account for N days before going live.
+- **Demo vs live** — VouchFX treats a broker demo account and a live account identically; users who want to test connect their broker's free demo account first. The broker connection shows a demo/live badge. (There is no separate demo-first channel mode.)
 - **Kill switch** — instantly pause a channel (with a choice: keep trades open vs close all).
 - **Default-SL policy** — what to do when a signal has no stop loss: apply a default SL / skip the signal / ask.
 - **Execution Mode** — per-user/per-channel choice: "Mirror provider exactly" (place the provider's SL/TP unchanged; lot via provider's-stated/fixed/risk-based; no auto-adjustments; no-SL requires explicit opt-in) vs "Apply my risk rules" (the risk engine sizes and manages). Hard caps (daily signal limit, max trades/day, daily loss cap) apply in both.
@@ -70,7 +70,7 @@ Never use: "investment advice", "guaranteed", "expected profit", "managed for yo
 | Text muted | `#5B6772` | Hints, timestamps |
 | Profit green | `#22C55E` | P&L gains, "connected" status only |
 | Loss red | `#EF4444` | P&L losses, "disconnected"/error status only |
-| Warning amber | `#F59E0B` | Warnings, "paused", "demo-first" status |
+| Warning amber | `#F59E0B` | Warnings, "paused" status |
 
 **Critical color rule:** green and red are **reserved strictly for money (P&L) and connection/status**. Never use green/red as a generic UI accent — the only action/brand color is teal.
 
@@ -92,7 +92,7 @@ Never use: "investment advice", "guaranteed", "expected profit", "managed for yo
 ## 5. Reusable component patterns
 
 - **Stat card:** small label (secondary), large monospace value (primary), optional delta in green/red. Used in dashboard top row.
-- **Status pill:** dot + text; teal=connected/live, amber=paused/demo-first, red=disconnected/error.
+- **Status pill:** dot + text; teal=connected/live, amber=paused, red=disconnected/error.
 - **Position row:** Symbol · Side · Lots · Entry · Current · SL · TP · P&L (green/red) · Channel · close action.
 - **Signal card (Telegram bubble):** a chat-style message bubble rendering the raw signal text with emojis; an "image signal" variant shows a placeholder screenshot block.
 - **Audit section:** stacked labeled cards forming a top-to-bottom trail (original → parsed → reasoning → checks → action → outcome).
@@ -114,7 +114,7 @@ Never use: "investment advice", "guaranteed", "expected profit", "managed for yo
 |---|---|---|---|---|
 | Gold Sniper VIP | 12,400 | Live | 3 / day | 2 of 3 |
 | FX Pips Pro | 8,100 | Live | uses global (5) | 2 of 5 |
-| Scalp Kings | 5,600 | Demo-first (4 days left) | 5 / day | 0 of 5 |
+| Scalp Kings | 5,600 | Live | 5 / day | 0 of 5 |
 | London Session Signals | 3,200 | Paused | — | — |
 
 **Open positions**

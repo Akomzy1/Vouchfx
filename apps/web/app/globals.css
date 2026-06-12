@@ -64,6 +64,124 @@
   .animate-marquee-rev {
     animation: marquee-rev 28s linear infinite;
   }
+
+  /* ── Landing page (matches design prototype) ── */
+  .grid-glow {
+    background-image:
+      radial-gradient(60% 50% at 70% 0%, rgba(20, 184, 166, 0.1), transparent 70%),
+      radial-gradient(40% 40% at 10% 10%, rgba(20, 184, 166, 0.05), transparent 70%);
+  }
+  .dot-grid {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  @keyframes floatIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulseDot {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+  .anim-float { animation: floatIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .live-dot   { animation: pulseDot 1.6s ease-in-out infinite; }
+  .ticket-shadow {
+    box-shadow: 0 30px 60px -28px rgba(20, 184, 166, 0.22), 0 0 0 1px #222B36;
+  }
+  .marquee-mask {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  }
+  .marquee-track { display: flex; width: max-content; animation: marquee 38s linear infinite; }
+  .marquee-track.rev { animation: marquee-rev 44s linear infinite; }
+  .marquee-row:hover .marquee-track { animation-play-state: paused; }
+
+  /* ── Dashboard (matches design prototype) ── */
+  .scroll-thin::-webkit-scrollbar { width: 9px; height: 9px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #222B36; border-radius: 999px; border: 2px solid #0B0F14; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slideIn {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+  }
+  @keyframes overlayIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes bannerIn {
+    from { opacity: 0; transform: translateY(-6px); max-height: 0; }
+    to   { opacity: 1; transform: translateY(0); max-height: 200px; }
+  }
+  @keyframes sheetIn {
+    from { opacity: 0; transform: translateY(16px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes expandIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .anim-fade    { animation: fadeUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .anim-slide   { animation: slideIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .anim-overlay { animation: overlayIn 0.25s ease both; }
+  .anim-banner  { animation: bannerIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .anim-sheet   { animation: sheetIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .anim-expand  { animation: expandIn 0.3s ease both; }
+
+  /* Telegram bubble tail (signal detail) */
+  .tg-tail::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    bottom: 11px;
+    width: 12px;
+    height: 14px;
+    background: inherit;
+    border-bottom-right-radius: 14px;
+    clip-path: path("M12 14 C 6 14, 0 10, 0 0 L 12 0 Z");
+  }
+
+  /* Range slider (risk override) */
+  .vfx-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    outline: none;
+    cursor: pointer;
+  }
+  .vfx-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 18px;
+    width: 18px;
+    border-radius: 50%;
+    background: #2DD4BF;
+    border: 3px solid #0B0F14;
+    box-shadow: 0 0 0 1px #14B8A6, 0 1px 4px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  .vfx-range::-webkit-slider-thumb:active { transform: scale(1.12); }
+  .vfx-range::-moz-range-thumb {
+    height: 18px;
+    width: 18px;
+    border-radius: 50%;
+    background: #2DD4BF;
+    border: 3px solid #0B0F14;
+    box-shadow: 0 0 0 1px #14B8A6;
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anim-float, .live-dot, .marquee-track, .marquee-track.rev,
+    .anim-fade, .anim-slide, .anim-overlay, .anim-banner,
+    .anim-sheet, .anim-expand { animation: none; }
+  }
 }
 
 @layer components {

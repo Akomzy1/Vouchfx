@@ -105,11 +105,20 @@ export class MetaApiExecutor implements Executor {
     return info.balance as number;
   }
 
-  async getAccountInfo(conn: BrokerConnection): Promise<{ balance: number; equity: number }> {
+  async getAccountInfo(
+    conn: BrokerConnection
+  ): Promise<{ balance: number; equity: number; accountMode: "demo" | "live" | null }> {
     this.register(conn);
     const connection = await this.rpc(conn.id);
     const info = await connection.getAccountInformation();
-    return { balance: info.balance as number, equity: info.equity as number };
+    // MT5 reports ACCOUNT_TRADE_MODE_DEMO / ACCOUNT_TRADE_MODE_REAL (contest → null)
+    const type = String(info.type ?? "").toUpperCase();
+    const accountMode: "demo" | "live" | null = type.includes("DEMO")
+      ? "demo"
+      : type.includes("REAL")
+        ? "live"
+        : null;
+    return { balance: info.balance as number, equity: info.equity as number, accountMode };
   }
 
   async getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number> {

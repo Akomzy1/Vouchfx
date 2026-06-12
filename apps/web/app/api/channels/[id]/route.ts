@@ -15,9 +15,10 @@ interface RouteParams {
 type PatchBody = {
   is_enabled?: boolean;
   daily_signal_limit?: number | null;
-  promote_to_live?: boolean;
   override_risk_enabled?: boolean;
   override_risk_pct?: number | null;
+  sl_policy?: "require" | "apply_default" | null;
+  reverse_trades?: boolean;
   kill_close_requested_at?: string | null;
 };
 
@@ -37,7 +38,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const updates: Record<string, unknown> = {};
   if (typeof body.is_enabled === "boolean") updates.is_enabled = body.is_enabled;
   if ("daily_signal_limit" in body) updates.daily_signal_limit = body.daily_signal_limit ?? null;
-  if (body.promote_to_live === true) updates.demo_until = null;
   if (typeof body.override_risk_enabled === "boolean") {
     updates.override_risk_enabled = body.override_risk_enabled;
   }
@@ -47,6 +47,16 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "override_risk_pct must be > 0 and ≤ 100" }, { status: 422 });
     }
     updates.override_risk_pct = v ?? null;
+  }
+  if ("sl_policy" in body) {
+    const v = body.sl_policy;
+    if (v !== null && v !== "require" && v !== "apply_default") {
+      return NextResponse.json({ error: "sl_policy must be 'require', 'apply_default', or null" }, { status: 422 });
+    }
+    updates.sl_policy = v ?? null;
+  }
+  if (typeof body.reverse_trades === "boolean") {
+    updates.reverse_trades = body.reverse_trades;
   }
   if ("kill_close_requested_at" in body) {
     updates.kill_close_requested_at = body.kill_close_requested_at ?? null;
@@ -62,7 +72,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     .update(updates)
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, demo_until, override_risk_enabled, override_risk_pct, kill_close_requested_at")
+    .select("id, telegram_chat_id, title, is_enabled, daily_signal_limit, override_risk_enabled, override_risk_pct, sl_policy, reverse_trades, kill_close_requested_at")
     .single();
 
   if (error) {

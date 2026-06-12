@@ -129,20 +129,32 @@ export function checkMinTradingDays(
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 /**
- * Extract the two ISO 4217 currency codes from a Forex symbol or commodity alias.
- * Returns e.g. ['XAU', 'USD'] for XAUUSD, ['EUR', 'USD'] for EURUSD.
- * Returns [] for indices/synthetics that carry no currency risk.
+ * Extract the currency codes whose news events affect a symbol.
+ * Forex pairs return both legs (['EUR','USD']); commodities and indices map
+ * to their driving currency (XAUUSD → ['XAU','USD'], US30 → ['USD']).
+ * Returns [] for unknown synthetics that carry no calendar-currency risk.
  */
 export function symbolCurrencies(symbol: string): string[] {
   const s = symbol.toUpperCase().replace(/[._].*$/, "").replace(/^(FX:|FX)/, "");
 
-  // Known commodity aliases
+  // Known commodity / index aliases
   const commodities: Record<string, string[]> = {
     XAUUSD: ["XAU", "USD"],
     XAGUSD: ["XAG", "USD"],
     XTIUSD: ["OIL", "USD"],
     XBRUSD: ["OIL", "USD"],
     XAUEUR: ["XAU", "EUR"],
+    US30:   ["USD"],
+    US100:  ["USD"],
+    US500:  ["USD"],
+    NAS100: ["USD"],
+    SPX500: ["USD"],
+    GER40:  ["EUR"],
+    DAX40:  ["EUR"],
+    UK100:  ["GBP"],
+    JPN225: ["JPY"],
+    BTCUSD: ["USD"],
+    ETHUSD: ["USD"],
   };
   if (commodities[s]) return commodities[s];
 

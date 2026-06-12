@@ -57,14 +57,12 @@ export default async function OnboardingPage() {
   if (hasTg && hasChannel && hasBroker && hasRisk) currentStep = 5;
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-4">
-      <OnboardingWizard
-        initialStep={currentStep}
-        completedSteps={{ hasTg, hasChannel, hasBroker, hasRisk }}
-        telegramStatus={(tgRow?.status ?? "none") as "active" | "limited" | "banned" | "disconnected" | "none"}
-        telegramLastConnected={tgRow?.last_connected_at ?? null}
-        alreadyReferred={alreadyReferred}
-      />
-    </div>
+    <OnboardingWizard
+      initialStep={currentStep}
+      completedSteps={{ hasTg, hasChannel, hasBroker, hasRisk }}
+      telegramStatus={(tgRow?.status ?? "none") as "active" | "limited" | "banned" | "disconnected" | "none"}
+      telegramLastConnected={tgRow?.last_connected_at ?? null}
+      alreadyReferred={alreadyReferred}
+    />
   );
 }

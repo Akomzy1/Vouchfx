@@ -1,3 +1,5 @@
+// MUST be first: loads .env before @vouchfx/config's parseEnv() singleton runs.
+import "./load-env";
 import http from "http";
 import { Queue } from "bullmq";
 import Redis from "ioredis";
@@ -14,7 +16,7 @@ initSentry(env.SENTRY_DSN, `listener@${env.NODE_ENV}`);
 
 log.info("starting", { NODE_ENV: env.NODE_ENV });
 
-const QUEUE_NAME = "vouchfx:signals";
+const QUEUE_NAME = "vouchfx-signals";
 const SYNC_INTERVAL_MS = 30_000;
 
 const required: [string, unknown][] = [

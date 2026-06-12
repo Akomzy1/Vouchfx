@@ -29,6 +29,17 @@ export function requireTelegramEnv(): TelegramEnv {
   return { apiId, apiHash, encryptionKey };
 }
 
+const silentLogger = {
+  levels: [] as string[],
+  log: () => {},
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  setLevel: () => {},
+  canSend: () => false,
+};
+
 export function createGramJsClient(
   { apiId, apiHash }: Pick<TelegramEnv, "apiId" | "apiHash">,
   sessionData = ""
@@ -37,7 +48,7 @@ export function createGramJsClient(
     connectionRetries: 3,
     requestRetries: 3,
     autoReconnect: false,
-    baseLogger: { levels: [], log: () => {} } as never,
+    baseLogger: silentLogger as never,
   });
 }
 

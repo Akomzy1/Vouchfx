@@ -165,11 +165,15 @@ export class UserPool {
         .in("user_id", userIds)
         .eq("is_enabled", true),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Order so the primary account wins; oldest active is the deterministic
+      // fallback when no row is flagged. brokerMap keeps the first per user.
       (this.db as any)
         .from("broker_connections")
-        .select("user_id, id")
+        .select("user_id, id, is_primary, created_at")
         .in("user_id", userIds)
-        .eq("is_active", true),
+        .eq("is_active", true)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true }),
     ]);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

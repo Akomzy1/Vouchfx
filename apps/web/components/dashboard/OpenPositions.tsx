@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { TrendingUp, TrendingDown, Clock } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Clock } from "lucide-react";
 
 interface Trade {
   id: string;
@@ -32,6 +32,27 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function fmtPrice(n: number | null): string {
+  if (n == null) return "—";
+  return n.toFixed(n >= 100 ? 2 : 5);
+}
+
+function SideTag({ side }: { side: "BUY" | "SELL" }) {
+  const buy = side === "BUY";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${
+        buy
+          ? "border-primary/30 bg-primary/10 text-primary-light"
+          : "border-border bg-surface-elevated text-text-secondary"
+      }`}
+    >
+      {buy ? <ArrowUpRight size={11} strokeWidth={2.5} /> : <ArrowDownRight size={11} strokeWidth={2.5} />}
+      {side}
+    </span>
+  );
+}
+
 export default function OpenPositions({ initialTrades, userId }: Props) {
   const [trades, setTrades] = useState<Trade[]>(initialTrades);
 
@@ -49,7 +70,6 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          // Re-fetch on any change to this user's trades
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (supabase as any)
             .from("trades")
@@ -72,52 +92,47 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
 
   if (trades.length === 0) {
     return (
-      <div className="card p-8 text-center">
+      <div className="p-8 text-center">
         <Clock size={24} className="mx-auto text-text-muted mb-2" />
         <p className="text-sm text-text-muted">No open positions.</p>
       </div>
     );
   }
 
+  const totalLots = trades.reduce((a, t) => a + (t.volume ?? 0), 0);
+  const H = "px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-text-muted";
+  const C = "px-3 py-3 text-sm";
+
   return (
-    <div className="card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+    <>
+      <div className="overflow-x-auto scroll-thin">
+        <table className="w-full min-w-[640px] border-collapse">
           <thead>
             <tr className="border-b border-border">
-              {["Symbol", "Side", "Volume", "Entry", "SL", "TP", "Opened"].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary whitespace-nowrap"
-                >
-                  {h}
-                </th>
-              ))}
+              <th className={H}>Symbol</th>
+              <th className={H}>Side</th>
+              <th className={`${H} text-right`}>Lots</th>
+              <th className={`${H} text-right`}>Entry</th>
+              <th className={`${H} text-right`}>SL</th>
+              <th className={`${H} text-right`}>TP</th>
+              <th className={`${H} text-right`}>Opened</th>
             </tr>
           </thead>
           <tbody>
             {trades.map((t) => (
-              <tr key={t.id} className="border-b border-border last:border-0 hover:bg-surface-elevated/40 transition-colors">
-                <td className="num px-4 py-2.5 font-semibold text-text-primary whitespace-nowrap">
-                  {t.symbol}
+              <tr
+                key={t.id}
+                className="border-b border-border/50 transition-colors last:border-0 hover:bg-surface-elevated/40"
+              >
+                <td className={`${C} font-semibold text-text-primary`}>{t.symbol}</td>
+                <td className={C}>
+                  <SideTag side={t.side} />
                 </td>
-                <td className="px-4 py-2.5">
-                  <span className={`inline-flex items-center gap-1 text-xs font-semibold ${t.side === "BUY" ? "text-profit" : "text-loss"}`}>
-                    {t.side === "BUY" ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                    {t.side}
-                  </span>
-                </td>
-                <td className="num px-4 py-2.5 text-text-secondary">{t.volume}</td>
-                <td className="num px-4 py-2.5 text-text-secondary">
-                  {t.entry_price != null ? t.entry_price.toFixed(5) : "—"}
-                </td>
-                <td className="num px-4 py-2.5 text-text-muted">
-                  {t.sl != null ? t.sl.toFixed(5) : "—"}
-                </td>
-                <td className="num px-4 py-2.5 text-text-muted">
-                  {t.tp != null ? t.tp.toFixed(5) : "—"}
-                </td>
-                <td className="px-4 py-2.5 text-text-muted text-xs whitespace-nowrap">
+                <td className={`${C} num text-right text-text-secondary`}>{t.volume?.toFixed(2) ?? "—"}</td>
+                <td className={`${C} num text-right text-text-primary`}>{fmtPrice(t.entry_price)}</td>
+                <td className={`${C} num text-right text-text-muted`}>{fmtPrice(t.sl)}</td>
+                <td className={`${C} num text-right text-text-muted`}>{fmtPrice(t.tp)}</td>
+                <td className={`${C} num text-right text-[12px] text-text-muted whitespace-nowrap`}>
                   {t.opened_at ? timeAgo(t.opened_at) : t.status === "PENDING" ? "pending" : "—"}
                 </td>
               </tr>
@@ -125,6 +140,11 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
           </tbody>
         </table>
       </div>
-    </div>
+      <div className="mt-3 flex items-center justify-between border-t border-border/50 px-1 pt-3 text-[12px]">
+        <span className="text-text-muted">
+          {trades.length} open · {totalLots.toFixed(2)} lots total exposure
+        </span>
+      </div>
+    </>
   );
 }

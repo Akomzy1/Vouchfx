@@ -68,11 +68,11 @@ Step 1 — Connect Telegram: Show a QR code mock and an alternative "Use phone n
 
 Step 2 — Choose channels: Show a searchable list of ~8 mock Telegram channels the user belongs to (e.g. "Gold Sniper VIP", "FX Pips Pro", "Scalp Kings", "London Session Signals") each with member counts and a toggle. Some on, some off. A running count: "3 channels selected".
 
-Step 3 — Connect broker: A form for MT5 — Broker (dropdown: Exness, HFM, FXTM, Deriv, Other), Server, Login, Password. A helper note recommending an investor/trade password (no withdrawal rights). A "Validate connection" button that shows a spinner then a success card with mock balance ($1,240.50) and equity.
+Step 3 — Connect broker: A form for MT5 — Broker (dropdown: Exness, HFM, FXTM, Deriv, Other), Server, Login, Password. A helper note recommending an investor/trade password (no withdrawal rights), and a second note: "Want to test first? Connect your broker's free demo account — VouchFX works identically on demo and live." A "Validate connection" button that shows a spinner then a success card with mock balance ($1,240.50) and equity.
 
 Step 4 — Set your risk: Controls for Execution Mode (segmented control: "Mirror provider exactly" vs "Apply my risk rules", default Apply-my-rules — when Mirror is selected, reveal a lot-size sub-choice: provider's stated lot / fixed lot / risk-based, plus an "Allow trades with no stop loss" acknowledgement checkbox), Risk per trade (slider/stepper, default 0.5%), Max trades per day (default 5), Daily signal limit (default 5), Default SL policy (radio: apply default SL / skip signal), News filter (toggle). Keep it clean.
 
-Step 5 — Go live: A summary card recapping channels, broker, and risk. A radio choice: "Go live now" vs "Demo-first for 7 days". A required checkbox: "I understand VouchFX executes signals I choose and does not provide financial advice." A teal "Finish & go live" button (disabled until the box is checked).
+Step 5 — Go live: A summary card recapping channels, broker, and risk. A required checkbox: "I understand VouchFX executes signals I choose and does not provide financial advice." A teal "Finish & go live" button (disabled until the box is checked).
 
 Polished, mobile responsive, with smooth step transitions.
 ```
@@ -125,7 +125,7 @@ Using the VouchFX design language, build the VouchFX "Channels" management scree
 A list/grid of the Telegram channels the user is copying. Each channel is a card or row showing:
 - Channel name + member count + a small avatar/initial.
 - A master on/off toggle (copying enabled).
-- Status: "Live", "Demo-first (4 days left)", or "Paused".
+- Status: "Live" or "Paused".
 - Key per-channel settings shown inline or in an expandable panel: Risk override (% or "uses global"), Daily signal limit override (e.g. "3 / day" or "uses global"), Default SL policy.
 - A signals-today counter (e.g. "2 of 3 today").
 - A red "Kill switch" action (pause channel) with a choice when triggered: "Pause & keep trades open" vs "Pause & close all".
@@ -200,7 +200,7 @@ Use realistic mock data, monospace tabular numbers, green only for earnings/posi
 Using the VouchFX design language, build a single navigable React artifact that stitches the core VouchFX app into one clickable prototype for a demo. Include a persistent left sidebar (collapsing to a bottom nav on mobile) that switches between these in-app views using React state (no routing library):
 
 1. Dashboard — stat cards (balance, equity, today's P&L, open trades, "Signals today 4 of 5"), an open-positions table with realistic forex rows and green/red P&L, a recent-activity feed, and an equity sparkline (recharts).
-2. Channels — list of copied Telegram channels with on/off toggles, status (Live / Demo-first / Paused), per-channel daily signal limit, and a kill switch.
+2. Channels — list of copied Telegram channels with on/off toggles, status (Live / Paused), per-channel daily signal limit, and a kill switch.
 3. Signal detail — opened by clicking any activity-feed row or position: shows original Telegram message → parsed fields + confidence + model → plain-English reasoning → risk checks → order sent to broker → live P&L. Include a toggle between an "Executed" and a "Skipped (no SL detected)" example.
 4. Risk — global risk settings: risk per trade, max trades/day, daily signal limit, daily loss cap, default-SL policy, breakeven/trailing, news filter.
 5. Billing — the 4 plan cards (Starter/Pro/Funded/Lifetime) with USD (Stripe) and naira (Paystack) options.

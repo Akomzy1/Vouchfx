@@ -22,8 +22,9 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from("broker_connections")
-    .select("id, label, platform, is_active, status, server_hint, last_status_at, created_at")
+    .select("id, label, platform, is_active, is_primary, status, account_mode, server_hint, last_status_at, created_at")
     .eq("user_id", user.id)
+    .order("is_primary", { ascending: false })
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -99,7 +100,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // Store the connection — credentials are NOT stored; only the MetaApi ID
+  // Store the connection — credentials are NOT stored; only the MetaApi ID.
+  // The user's first account becomes primary (where new signals route).
+  const isFirst = (brokerCount ?? 0) === 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: conn, error: dbErr } = await (supabase as any)
     .from("broker_connections")
@@ -109,10 +112,11 @@ export async function POST(request: Request) {
       platform: platform.toUpperCase(),
       label,
       is_active: true,
+      is_primary: isFirst,
       status: "deploying",
       server_hint: server,
     })
-    .select("id, label, platform, is_active, status, server_hint, created_at")
+    .select("id, label, platform, is_active, is_primary, status, server_hint, created_at")
     .single();
 
   if (dbErr) {

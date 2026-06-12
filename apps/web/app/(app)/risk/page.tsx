@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { Globe2 } from "lucide-react";
 import RiskSettingsForm, { type RiskSettings } from "@/components/risk/RiskSettingsForm";
 import type { Metadata } from "next";
 
@@ -32,11 +33,16 @@ export default async function RiskPage() {
   if (!user) redirect("/login");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
-    .from("risk_settings")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const db = supabase as any;
+
+  const [{ data }, { data: broker }] = await Promise.all([
+    db.from("risk_settings").select("*").eq("user_id", user.id).maybeSingle(),
+    db.from("broker_connections")
+      .select("label, platform, last_balance_usd")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   const initial: RiskSettings = data
     ? {
@@ -60,16 +66,28 @@ export default async function RiskPage() {
       }
     : DEFAULTS;
 
+  const brokerRow = broker as { label: string | null; last_balance_usd: number | null } | null;
+
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Risk Settings</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Position sizing, daily limits, and drawdown protection. Changes apply to new signals only.
-        </p>
+    <div className="mx-auto w-full max-w-[920px]">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-[20px] font-bold tracking-tight text-text-primary sm:text-[22px]">Risk settings</h1>
+          <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-text-secondary">
+            Your global rulebook. These defaults apply to every channel unless it overrides them.
+            VouchFX never opens a trade that breaks these limits.
+          </p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary-light">
+          <Globe2 size={13} /> Global rules
+        </span>
       </div>
 
-      <RiskSettingsForm initial={initial} />
+      <RiskSettingsForm
+        initial={initial}
+        balance={brokerRow?.last_balance_usd ?? null}
+        brokerLabel={brokerRow?.label ?? null}
+      />
     </div>
   );
 }

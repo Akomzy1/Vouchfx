@@ -1,5 +1,5 @@
 /**
- * BullMQ job payload for the "vouchfx:signals" queue.
+ * BullMQ job payload for the "vouchfx-signals" queue.
  *
  * Job ID = idempotencyKey = "${chat_id}:${message_id}:${edit_version}".
  * Cancel jobs use "${chat_id}:${message_id}:cancel" so they don't collide

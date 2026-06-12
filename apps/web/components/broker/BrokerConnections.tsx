@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2, Loader2, AlertCircle, CheckCircle, Server } from "lucide-react";
+import { Plus, Trash2, Loader2, AlertCircle, CheckCircle, Server, Star } from "lucide-react";
 import StatusPill from "@/components/ui/StatusPill";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -11,10 +11,31 @@ export interface BrokerConnectionRow {
   label: string | null;
   platform: string;
   is_active: boolean;
+  /** The account new signals route to. At most one per user. */
+  is_primary: boolean;
   status: "deploying" | "connected" | "disconnected" | "error";
+  /** demo | live — from MetaApi account info; null until first sync. */
+  account_mode: "demo" | "live" | null;
   server_hint: string | null;
   last_status_at: string | null;
   created_at: string;
+}
+
+/** Demo/live badge — derived from MetaApi account info, cached by the executor. */
+function AccountModeBadge({ mode }: { mode: "demo" | "live" | null }) {
+  if (!mode) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+        mode === "live"
+          ? "border-profit/30 bg-profit/10 text-profit"
+          : "border-warning/30 bg-warning/10 text-warning"
+      }`}
+      title={mode === "live" ? "Real-money account" : "Broker demo account — no real funds at risk"}
+    >
+      {mode}
+    </span>
+  );
 }
 
 interface BrokerConnectionsProps {
@@ -25,13 +46,18 @@ interface BrokerConnectionsProps {
 
 function ConnectionCard({
   conn,
+  multiple,
   onRemove,
+  onMakePrimary,
 }: {
   conn: BrokerConnectionRow;
+  multiple: boolean;
   onRemove: (id: string) => void;
+  onMakePrimary: (id: string) => Promise<void>;
 }) {
   const [status, setStatus] = useState(conn.status);
   const [removing, setRemoving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
 
   // Poll for status while deploying
   useEffect(() => {
@@ -62,6 +88,17 @@ function ConnectionCard({
     }
   }
 
+  async function handleMakePrimary() {
+    setPromoting(true);
+    try {
+      await onMakePrimary(conn.id);
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  const canMakePrimary = multiple && !conn.is_primary && status !== "deploying";
+
   const pillStatus =
     status === "connected" ? "connected" :
     status === "deploying" ? "paused" :
@@ -77,8 +114,17 @@ function ConnectionCard({
       <div className="flex items-start gap-3 min-w-0">
         <Server size={14} className="text-text-muted mt-0.5 shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-text-primary truncate">
+          <p className="flex items-center gap-2 text-sm font-medium text-text-primary truncate">
             {conn.label ?? `${conn.platform} Account`}
+            <AccountModeBadge mode={conn.account_mode} />
+            {conn.is_primary && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-light"
+                title="New signals route to this account"
+              >
+                <Star size={9} className="fill-current" /> Primary
+              </span>
+            )}
           </p>
           <div className="flex items-center gap-2 mt-0.5">
             <StatusPill status={pillStatus} label={statusLabel} />
@@ -88,14 +134,26 @@ function ConnectionCard({
           </div>
         </div>
       </div>
-      <button
-        onClick={handleRemove}
-        disabled={removing}
-        className="ml-3 text-text-muted hover:text-loss disabled:opacity-40 transition-colors"
-        aria-label={`Remove ${conn.label ?? "broker account"}`}
-      >
-        {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-      </button>
+      <div className="ml-3 flex shrink-0 items-center gap-3">
+        {canMakePrimary && (
+          <button
+            onClick={handleMakePrimary}
+            disabled={promoting}
+            className="flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-primary disabled:opacity-40 transition-colors"
+          >
+            {promoting ? <Loader2 size={12} className="animate-spin" /> : <Star size={12} />}
+            Make primary
+          </button>
+        )}
+        <button
+          onClick={handleRemove}
+          disabled={removing}
+          className="text-text-muted hover:text-loss disabled:opacity-40 transition-colors"
+          aria-label={`Remove ${conn.label ?? "broker account"}`}
+        >
+          {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -136,6 +194,16 @@ function AddBrokerForm({ onAdded, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+      {/* Demo-account note (PRD R6: demo and live are treated identically) */}
+      <p className="flex items-start gap-2 rounded-lg border border-border bg-surface-elevated/60 px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
+        <CheckCircle size={13} className="mt-0.5 shrink-0 text-primary" />
+        <span>
+          Want to test first? Connect your broker&rsquo;s{" "}
+          <strong className="text-text-primary">free demo account</strong> — VouchFX works
+          identically on demo and live.
+        </span>
+      </p>
+
       {/* Platform toggle */}
       <div className="flex rounded-lg border border-border overflow-hidden">
         {(["mt5", "mt4"] as const).map(p => (
@@ -265,7 +333,28 @@ export default function BrokerConnections({ initialConnections }: BrokerConnecti
   }, []);
 
   const handleRemove = useCallback((id: string) => {
-    setConnections(prev => prev.filter(c => c.id !== id));
+    setConnections(prev => {
+      const removed = prev.find(c => c.id === id);
+      const rest = prev.filter(c => c.id !== id);
+      // Mirror the API's successor promotion: if the primary was removed,
+      // promote the oldest remaining account so the badge stays accurate.
+      if (removed?.is_primary && rest.length > 0 && !rest.some(c => c.is_primary)) {
+        const successor = [...rest].sort((a, b) => {
+          if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+          return a.created_at.localeCompare(b.created_at);
+        })[0];
+        if (successor) {
+          return rest.map(c => (c.id === successor.id ? { ...c, is_primary: true } : c));
+        }
+      }
+      return rest;
+    });
+  }, []);
+
+  const handleMakePrimary = useCallback(async (id: string) => {
+    const res = await fetch(`/api/broker/${id}/primary`, { method: "POST" });
+    if (!res.ok) return;
+    setConnections(prev => prev.map(c => ({ ...c, is_primary: c.id === id })));
   }, []);
 
   return (
@@ -274,7 +363,13 @@ export default function BrokerConnections({ initialConnections }: BrokerConnecti
       {connections.length > 0 && !adding && (
         <div className="card px-4 py-0">
           {connections.map(conn => (
-            <ConnectionCard key={conn.id} conn={conn} onRemove={handleRemove} />
+            <ConnectionCard
+              key={conn.id}
+              conn={conn}
+              multiple={connections.length > 1}
+              onRemove={handleRemove}
+              onMakePrimary={handleMakePrimary}
+            />
           ))}
         </div>
       )}

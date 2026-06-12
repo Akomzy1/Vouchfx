@@ -70,11 +70,11 @@ export default async function ReferPage() {
   const ownReferral = ownReferralResult.data as { referral_code: string; first_month_discount_applied: boolean } | null;
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-xl font-semibold text-text-primary">Refer &amp; Earn</h1>
-        <p className="text-sm text-text-secondary mt-0.5">
-          Earn 20% recurring commission on every subscription payment from users you refer.
+    <div className="mx-auto w-full max-w-[1120px]">
+      <div className="mb-5">
+        <h1 className="text-[20px] font-bold tracking-tight text-text-primary sm:text-[22px]">Refer &amp; earn</h1>
+        <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-text-secondary">
+          Two ways to earn with VouchFX — both pay <span className="font-semibold text-primary-light">20%</span>.
         </p>
       </div>
 

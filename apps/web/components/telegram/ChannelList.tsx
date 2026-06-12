@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
-  Radio, RefreshCw, Loader2, AlertCircle, Hash, Megaphone,
-  FlaskConical, ArrowUpCircle, ChevronDown, ChevronUp,
-  Zap, TrendingDown, Pause,
+  Send, Plus, X, Check, Users, Server, Search, Loader2,
+  CircleCheck, PauseCircle, OctagonX, XCircle,
+  SlidersHorizontal, ChevronDown, Gauge, ListFilter,
+  Minus, Zap, ShieldCheck, ShieldHalf, Repeat2, TriangleAlert,
 } from "lucide-react";
 import type { TelegramDialog } from "@/app/api/telegram/channels/route";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+/* ─── Types ─────────────────────────────────────────────────────────────────── */
+
+export type ChannelSlPolicy = "require" | "apply_default" | null;
 
 export interface ChannelSource {
   id: string;
@@ -16,740 +19,880 @@ export interface ChannelSource {
   title: string | null;
   is_enabled: boolean;
   daily_signal_limit: number | null;
-  demo_until: string | null;
   override_risk_enabled: boolean;
   override_risk_pct: number | null;
+  /** Per-channel no-SL policy: null = use global. */
+  sl_policy: ChannelSlPolicy;
+  /** Flip BUY/SELL for this channel. */
+  reverse_trades: boolean;
   signals_today: number;
 }
 
 interface ChannelListProps {
   initialSources: ChannelSource[];
+  globalRiskPct: number;
+  globalDailyLimit: number; // 0 = no global limit
+  brokerLabel: string | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+/* ─── Helpers ───────────────────────────────────────────────────────────────── */
 
-function isDemo(source: ChannelSource): boolean {
-  return !!source.demo_until && new Date(source.demo_until) > new Date();
+function statusOf(s: ChannelSource): { label: string; icon: React.ElementType; cls: string; live: boolean } {
+  if (!s.is_enabled) return { label: "Paused", icon: PauseCircle, cls: "border-warning/30 bg-warning/10 text-warning", live: false };
+  return { label: "Live", icon: CircleCheck, cls: "border-profit/30 bg-profit/10 text-profit", live: true };
 }
 
-function demoDaysLeft(demoUntil: string): number {
-  return Math.max(0, Math.ceil((new Date(demoUntil).getTime() - Date.now()) / 86_400_000));
+function titleOf(s: ChannelSource): string {
+  return s.title ?? `Chat ${s.telegram_chat_id}`;
 }
 
-function formatMembers(count: number | null): string {
-  if (count === null) return "";
-  if (count >= 1000) return `${(count / 1000).toFixed(1)}k members`;
-  return `${count} members`;
+/* ─── Primitives ────────────────────────────────────────────────────────────── */
+
+function Toggle({
+  on, onChange, disabled, label, size = "base",
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label: string;
+  size?: "sm" | "base";
+}) {
+  const d = size === "sm"
+    ? { w: "w-9", h: "h-5", k: "h-3.5 w-3.5", on: "translate-x-[18px]", off: "translate-x-[3px]" }
+    : { w: "w-11", h: "h-6", k: "h-[18px] w-[18px]", on: "translate-x-[22px]", off: "translate-x-[3px]" };
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!on)}
+      className={`relative inline-flex ${d.w} ${d.h} shrink-0 items-center rounded-full border transition-colors duration-200 ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      } ${on ? "border-primary bg-primary" : "border-border bg-surface-elevated"}`}
+    >
+      <span
+        className={`pointer-events-none inline-block ${d.k} transform rounded-full transition-transform duration-200 ${
+          on ? `${d.on} bg-[#04201D]` : `${d.off} bg-text-secondary`
+        }`}
+      />
+    </button>
+  );
 }
 
-// ─── SummaryStrip ─────────────────────────────────────────────────────────────
+function SignalMeter({ used, limit }: { used: number; limit: number }) {
+  const full = used >= limit;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex gap-1" aria-hidden="true">
+        {Array.from({ length: Math.min(limit, 8) }).map((_, i) => (
+          <span key={i} className={`h-3.5 w-1.5 rounded-full ${i < used ? (full ? "bg-warning" : "bg-primary") : "bg-surface-elevated"}`} />
+        ))}
+      </div>
+      <span className={`num text-[12px] font-semibold ${full ? "text-warning" : "text-text-secondary"}`}>
+        {used} of {limit}
+      </span>
+    </div>
+  );
+}
 
-function SummaryStrip({ sources }: { sources: ChannelSource[] }) {
-  const live    = sources.filter(s => s.is_enabled && !isDemo(s)).length;
-  const demo    = sources.filter(s => s.is_enabled && isDemo(s)).length;
-  const paused  = sources.filter(s => !s.is_enabled).length;
-  const signals = sources.reduce((a, s) => a + s.signals_today, 0);
+function InlineSetting({ icon: Icon, label, value, custom }: { icon: React.ElementType; label: string; value: string; custom: boolean }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-bg/40 px-2.5 py-1.5">
+      <Icon size={13} className="text-text-muted" />
+      {label && <span className="text-[11px] text-text-muted">{label}</span>}
+      <span className={`num ml-0.5 text-[12px] font-semibold ${custom ? "text-primary-light" : "text-text-secondary"}`}>{value}</span>
+    </div>
+  );
+}
 
-  const items = [
-    { label: "Total",         value: sources.length, cls: "text-text-primary" },
-    { label: "Live",          value: live,           cls: "text-profit" },
-    { label: "Demo",          value: demo,           cls: "text-warning" },
-    { label: "Paused",        value: paused,         cls: "text-text-muted" },
-    { label: "Signals today", value: signals,        cls: "text-primary" },
-  ] as const;
+function Stepper({ value, min, max, onChange, disabled }: { value: number; min: number; max: number; onChange: (v: number) => void; disabled?: boolean }) {
+  const btn = "flex h-8 w-8 items-center justify-center text-text-secondary transition-colors hover:text-text-primary disabled:opacity-30";
+  return (
+    <div className={`inline-flex items-center rounded-lg border border-border bg-bg/50 ${disabled ? "opacity-50" : ""}`}>
+      <button className={btn} disabled={disabled || value <= min} onClick={() => onChange(Math.max(min, value - 1))} aria-label="Decrease">
+        <Minus size={15} />
+      </button>
+      <span className="num w-10 text-center text-[14px] font-bold text-text-primary">{value}</span>
+      <button className={btn} disabled={disabled || value >= max} onClick={() => onChange(Math.min(max, value + 1))} aria-label="Increase">
+        <Plus size={15} />
+      </button>
+    </div>
+  );
+}
+
+/* ─── Modal shell ───────────────────────────────────────────────────────────── */
+
+function ModalShell({ children, onClose, max = "max-w-md" }: { children: React.ReactNode; onClose: () => void; max?: string }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <div className="anim-overlay absolute inset-0 bg-black/65 backdrop-blur-sm" onClick={onClose} />
+      <div className={`anim-sheet relative z-10 w-full ${max} rounded-t-2xl border border-border bg-surface shadow-2xl sm:rounded-2xl`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Kill switch modal ─────────────────────────────────────────────────────── */
+
+type KillAction = "keep" | "close";
+
+function KillModal({ title, busy, onClose, onConfirm }: { title: string; busy: boolean; onClose: () => void; onConfirm: (a: KillAction) => void }) {
+  const [choice, setChoice] = useState<KillAction>("keep");
+  const options: [KillAction, string, string, React.ElementType, "warn" | "loss"][] = [
+    ["keep", "Pause & keep trades open", "Stop copying new signals. Open positions keep running under their existing SL/TP — manage them manually.", PauseCircle, "warn"],
+    ["close", "Pause & close all", "Stop copying AND immediately close all open positions from this channel at market. Locks in current P&L.", XCircle, "loss"],
+  ];
+  return (
+    <ModalShell onClose={onClose}>
+      <div className="flex items-start gap-3 border-b border-border p-5">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-loss/30 bg-loss/10 text-loss">
+          <OctagonX size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[16px] font-bold tracking-tight text-text-primary">Kill switch — {title}</h2>
+          <p className="mt-0.5 text-[12.5px] leading-relaxed text-text-secondary">
+            Choose how to handle this channel&rsquo;s open trades when you pause it.
+          </p>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1 text-text-muted transition-colors hover:text-text-primary" aria-label="Close">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="flex flex-col gap-2.5 p-5">
+        {options.map(([key, label, desc, Icon, tone]) => {
+          const on = choice === key;
+          const ring = on
+            ? tone === "loss" ? "border-loss/50 bg-loss/[0.07]" : "border-warning/50 bg-warning/[0.07]"
+            : "border-border bg-bg/40 hover:border-text-muted";
+          return (
+            <button key={key} onClick={() => setChoice(key)} className={`flex items-start gap-3 rounded-xl border p-3.5 text-left transition-colors ${ring}`}>
+              <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${on ? (tone === "loss" ? "border-loss" : "border-warning") : "border-text-muted"}`}>
+                {on && <span className={`h-2 w-2 rounded-full ${tone === "loss" ? "bg-loss" : "bg-warning"}`} />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <Icon size={14} className={tone === "loss" ? "text-loss" : "text-warning"} />
+                  <span className="text-[13.5px] font-semibold text-text-primary">{label}</span>
+                </span>
+                <span className="mt-1 block text-[12px] leading-relaxed text-text-secondary">{desc}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2.5 border-t border-border p-4">
+        <button onClick={onClose} className="flex-1 rounded-xl border border-border bg-surface-elevated px-4 py-2.5 text-[13px] font-semibold text-text-secondary transition-colors hover:text-text-primary">
+          Cancel
+        </button>
+        <button
+          onClick={() => onConfirm(choice)}
+          disabled={busy}
+          className={`inline-flex flex-[1.4] items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition-all hover:brightness-110 active:translate-y-px disabled:opacity-50 ${
+            choice === "close" ? "bg-loss text-white" : "bg-warning text-[#3A2200]"
+          }`}
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : choice === "close" ? <XCircle size={16} /> : <PauseCircle size={16} />}
+          {choice === "close" ? "Pause & close all" : "Pause & keep open"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ─── Add channel modal (discovers from the user's Telegram) ───────────────── */
+
+function AddModal({
+  existingChatIds, onClose, onAdded,
+}: {
+  existingChatIds: Set<string>;
+  onClose: () => void;
+  onAdded: (s: ChannelSource) => void;
+}) {
+  const [dialogs, setDialogs] = useState<TelegramDialog[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [addingId, setAddingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/telegram/channels")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) setError(d.error as string);
+        else setDialogs((d.channels ?? []) as TelegramDialog[]);
+      })
+      .catch(() => setError("Failed to load your Telegram channels."));
+  }, []);
+
+  async function add(d: TelegramDialog) {
+    setAddingId(d.chatId);
+    try {
+      const res = await fetch("/api/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegram_chat_id: d.chatId, title: d.title }),
+      });
+      const json = await res.json();
+      if (res.ok && json.source) {
+        const s = json.source as Omit<ChannelSource, "override_risk_enabled" | "override_risk_pct" | "sl_policy" | "reverse_trades" | "signals_today">;
+        onAdded({
+          ...s,
+          telegram_chat_id: String(s.telegram_chat_id),
+          override_risk_enabled: false,
+          override_risk_pct: null,
+          sl_policy: null,
+          reverse_trades: false,
+          signals_today: 0,
+        });
+      } else {
+        setError((json.error as string) ?? "Failed to add channel");
+      }
+    } finally {
+      setAddingId(null);
+    }
+  }
+
+  const list = (dialogs ?? []).filter(
+    (d) => !existingChatIds.has(d.chatId) && d.title.toLowerCase().includes(query.toLowerCase())
+  );
 
   return (
-    <div className="grid grid-cols-5 overflow-hidden rounded-xl border border-border bg-surface">
-      {items.map((item, i) => (
-        <div
-          key={item.label}
-          className={`flex flex-col items-center gap-0.5 py-3 ${i < items.length - 1 ? "border-r border-border/60" : ""}`}
-        >
-          <span className={`num text-lg font-bold leading-none ${item.cls}`}>{item.value}</span>
-          <span className="mt-0.5 text-center text-[10px] leading-tight text-text-muted">{item.label}</span>
+    <ModalShell onClose={onClose} max="max-w-lg">
+      <div className="flex items-center gap-3 border-b border-border p-5">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 text-primary-light">
+          <Plus size={20} strokeWidth={2.5} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[16px] font-bold tracking-tight text-text-primary">Add a channel</h2>
+          <p className="mt-0.5 text-[12.5px] text-text-secondary">
+            Pick a channel you follow — VouchFX will start listening.
+          </p>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1 text-text-muted transition-colors hover:text-text-primary" aria-label="Close">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-3 p-5">
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-bg/50 px-3 focus-within:border-primary/50">
+          <Search size={16} className="text-text-muted" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            placeholder="Search your channels…"
+            className="num w-full bg-transparent py-2.5 text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-loss/30 bg-loss/[0.07] px-3.5 py-2.5 text-[12px] text-loss">{error}</div>
+        )}
+
+        {dialogs === null && !error ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-text-muted">
+            <Loader2 size={18} className="animate-spin" />
+            <span className="text-[13px]">Loading your Telegram channels…</span>
+          </div>
+        ) : (
+          <div className="scroll-thin max-h-[320px] overflow-y-auto rounded-xl border border-border">
+            {list.length === 0 && dialogs !== null ? (
+              <div className="px-4 py-8 text-center text-[13px] text-text-muted">
+                {query ? "No channels match your search." : "No new channels found — you've added them all."}
+              </div>
+            ) : (
+              list.map((d) => (
+                <button
+                  key={d.chatId}
+                  onClick={() => add(d)}
+                  disabled={addingId !== null}
+                  className="flex w-full items-center gap-3 border-b border-border/60 px-3.5 py-3 text-left transition-colors last:border-0 hover:bg-surface-elevated/50 disabled:opacity-60"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 text-[15px] font-bold text-primary-light">
+                    {d.title.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold text-text-primary">{d.title}</span>
+                    <span className="num mt-0.5 flex items-center gap-2 text-[11px] text-text-muted">
+                      {d.isChannel && !d.isMegagroup ? "Channel" : "Group"}
+                      {d.participantsCount != null && (
+                        <span className="inline-flex items-center gap-1">
+                          <Users size={10} /> {d.participantsCount.toLocaleString()}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  {addingId === d.chatId ? (
+                    <Loader2 size={16} className="shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Plus size={16} className="shrink-0 text-text-muted" />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        <p className="flex items-start gap-2 text-[11.5px] leading-relaxed text-text-muted">
+          <ShieldCheck size={13} className="mt-0.5 shrink-0 text-primary-light" />
+          Want to test first? Connect your broker&rsquo;s free demo account — VouchFX works identically on demo and live.
+        </p>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ─── Expanded override panel ──────────────────────────────────────────────── */
+
+function OverridePanel({
+  source, globalRiskPct, globalDailyLimit, brokerLabel, onPatch,
+}: {
+  source: ChannelSource;
+  globalRiskPct: number;
+  globalDailyLimit: number;
+  brokerLabel: string | null;
+  onPatch: (id: string, body: Record<string, unknown>, optimistic: Partial<ChannelSource>) => void;
+}) {
+  const riskActive = source.override_risk_enabled;
+  const [riskVal, setRiskVal] = useState(source.override_risk_pct ?? globalRiskPct);
+  const shownRisk = riskActive ? riskVal : globalRiskPct;
+  const pct = ((shownRisk - 0.1) / (3 - 0.1)) * 100;
+
+  const limitActive = source.daily_signal_limit != null;
+  const limitVal = source.daily_signal_limit ?? (globalDailyLimit > 0 ? globalDailyLimit : 5);
+
+  const commitRisk = () => {
+    if (riskActive) onPatch(source.id, { override_risk_pct: riskVal }, { override_risk_pct: riskVal });
+  };
+
+  return (
+    <div className="anim-expand border-t border-border bg-bg/30 px-4 py-5 sm:px-5">
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* Risk override */}
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Gauge size={15} className="text-primary-light" />
+              <span className="text-[13px] font-semibold text-text-primary">Risk per trade</span>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-[11.5px] text-text-secondary">
+              Override global
+              <Toggle
+                size="sm"
+                on={riskActive}
+                onChange={(v) =>
+                  onPatch(
+                    source.id,
+                    { override_risk_enabled: v, override_risk_pct: v ? riskVal : null },
+                    { override_risk_enabled: v, override_risk_pct: v ? riskVal : null }
+                  )
+                }
+                label="Override risk"
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex items-baseline justify-between">
+            <span className={`num text-[26px] font-bold leading-none ${riskActive ? "text-primary-light" : "text-text-muted"}`}>
+              {shownRisk.toFixed(2)}%
+            </span>
+            <span className="text-[11px] text-text-muted">
+              {riskActive ? "of equity per signal" : `using global · ${globalRiskPct}%`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0.1}
+            max={3}
+            step={0.05}
+            value={shownRisk}
+            disabled={!riskActive}
+            onChange={(e) => setRiskVal(parseFloat(e.target.value))}
+            onMouseUp={commitRisk}
+            onTouchEnd={commitRisk}
+            onKeyUp={commitRisk}
+            className="vfx-range mt-3"
+            style={{
+              background: riskActive ? `linear-gradient(90deg,#14B8A6 ${pct}%,#222B36 ${pct}%)` : "#222B36",
+              opacity: riskActive ? 1 : 0.5,
+            }}
+          />
+          <div className="num mt-1.5 flex justify-between text-[10px] text-text-muted">
+            <span>0.10%</span>
+            <span>conservative · aggressive</span>
+            <span>3.00%</span>
+          </div>
+        </div>
+
+        {/* Daily signal limit */}
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ListFilter size={15} className="text-primary-light" />
+              <span className="text-[13px] font-semibold text-text-primary">Daily signal limit</span>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-[11.5px] text-text-secondary">
+              Override global
+              <Toggle
+                size="sm"
+                on={limitActive}
+                onChange={(v) =>
+                  onPatch(
+                    source.id,
+                    { daily_signal_limit: v ? limitVal : null },
+                    { daily_signal_limit: v ? limitVal : null }
+                  )
+                }
+                label="Override limit"
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <div>
+              <div className="text-[11px] text-text-muted">Max trades copied / day</div>
+              <div className="num mt-0.5 text-[12px] text-text-secondary">
+                {limitActive
+                  ? `${source.signals_today} used so far today`
+                  : globalDailyLimit > 0
+                    ? `using global · ${globalDailyLimit}/day`
+                    : "using global · unlimited"}
+              </div>
+            </div>
+            <Stepper
+              value={limitVal}
+              min={1}
+              max={20}
+              disabled={!limitActive}
+              onChange={(v) => onPatch(source.id, { daily_signal_limit: v }, { daily_signal_limit: v })}
+            />
+          </div>
+          <div className="mt-3 rounded-lg border border-border/70 bg-bg/40 px-3 py-2 text-[11px] text-text-muted">
+            Extra signals beyond the limit are logged but not traded.
+          </div>
+        </div>
+
+        {/* Default stop-loss policy */}
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center gap-2">
+            <ShieldHalf size={15} className="text-primary-light" />
+            <span className="text-[13px] font-semibold text-text-primary">Default stop-loss policy</span>
+          </div>
+          <div className="mt-3 flex flex-col gap-2">
+            {([
+              [null, "Use global policy", "Inherit your default stop-loss policy from Risk settings"],
+              ["require", "Require SL — skip if missing", "Never trade a signal from this channel with no stop loss"],
+              ["apply_default", "Auto SL when missing", "Apply your default SL (pips set in Risk settings)"],
+            ] as [ChannelSlPolicy, string, string][]).map(([key, label, desc]) => {
+              const on = source.sl_policy === key;
+              return (
+                <button
+                  key={String(key)}
+                  onClick={() => onPatch(source.id, { sl_policy: key }, { sl_policy: key })}
+                  className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                    on ? "border-primary/40 bg-primary/[0.07]" : "border-border bg-bg/40 hover:border-text-muted"
+                  }`}
+                >
+                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${on ? "border-primary" : "border-text-muted"}`}>
+                    {on && <span className="h-2 w-2 rounded-full bg-primary" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className={`block text-[12.5px] font-medium ${on ? "text-text-primary" : "text-text-secondary"}`}>{label}</span>
+                    <span className="mt-0.5 block text-[11px] text-text-muted">{desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Reverse trades + routed-to */}
+        <div className="flex flex-col gap-3">
+          <div className="rounded-xl border border-border bg-surface p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-elevated text-text-secondary">
+                  <Repeat2 size={16} />
+                </span>
+                <div>
+                  <div className="text-[13px] font-semibold text-text-primary">Reverse trades</div>
+                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-text-muted">
+                    Flip every BUY to SELL and vice-versa. For fading a channel you think runs opposite.
+                  </p>
+                </div>
+              </div>
+              <Toggle
+                on={source.reverse_trades}
+                onChange={(v) => onPatch(source.id, { reverse_trades: v }, { reverse_trades: v })}
+                label="Reverse trades"
+              />
+            </div>
+            {source.reverse_trades && (
+              <div className="num mt-3 flex items-center gap-1.5 rounded-lg border border-warning/30 bg-warning/[0.07] px-2.5 py-1.5 text-[11px] text-warning">
+                <TriangleAlert size={12} /> Reversing active — trades execute opposite to the signal, SL/TP swapped.
+              </div>
+            )}
+          </div>
+          <div className="flex flex-1 items-center justify-between rounded-xl border border-border bg-surface px-4 py-3">
+            <span className="flex items-center gap-2 text-[12px] text-text-secondary">
+              <Server size={14} className="text-text-muted" /> Routed to
+              <span className="num font-semibold text-text-primary">{brokerLabel ?? "your broker"} — MT5</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Channel card ──────────────────────────────────────────────────────────── */
+
+function ChannelCard({
+  source, globalRiskPct, globalDailyLimit, brokerLabel, expanded,
+  onToggleExpand, onToggleEnabled, onKill, onPatch,
+}: {
+  source: ChannelSource;
+  globalRiskPct: number;
+  globalDailyLimit: number;
+  brokerLabel: string | null;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onToggleEnabled: (v: boolean) => void;
+  onKill: () => void;
+  onPatch: (id: string, body: Record<string, unknown>, optimistic: Partial<ChannelSource>) => void;
+}) {
+  const st = statusOf(source);
+  const StIcon = st.icon;
+  const title = titleOf(source);
+  const limit = source.daily_signal_limit ?? (globalDailyLimit > 0 ? globalDailyLimit : 0);
+  const muted = !source.is_enabled;
+
+  const avatarCls = muted
+    ? "border-border bg-surface-elevated text-text-muted"
+    : "border-primary/30 bg-primary/10 text-primary-light";
+
+  return (
+    <div className={`overflow-hidden rounded-2xl border bg-surface transition-colors ${expanded ? "border-primary/30" : "border-border"} ${muted ? "opacity-80" : ""}`}>
+      {/* Header row */}
+      <div className="flex flex-col gap-4 p-4 sm:p-5 md:flex-row md:items-center">
+        {/* Identity */}
+        <div className="flex min-w-0 flex-1 items-center gap-3.5">
+          <span className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-[17px] font-bold ${avatarCls}`}>
+            {title.charAt(0).toUpperCase()}
+            <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-surface bg-surface-elevated text-primary-light">
+              <Send size={10} />
+            </span>
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="truncate text-[15px] font-bold tracking-tight text-text-primary">{title}</h3>
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${st.cls}`}>
+                <StIcon size={11} /> {st.label}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-text-muted">
+              <span className="num">{source.telegram_chat_id}</span>
+              {brokerLabel && (
+                <span className="inline-flex items-center gap-1">
+                  <Server size={11} /> {brokerLabel}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Signals today */}
+        <div className="flex shrink-0 items-center gap-2 md:flex-col md:items-end md:gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted md:order-1">Signals today</span>
+          <div className="md:order-2">
+            {limit > 0 ? (
+              <SignalMeter used={source.signals_today} limit={limit} />
+            ) : (
+              <span className="num text-[12px] font-semibold text-text-secondary">{source.signals_today} today</span>
+            )}
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex shrink-0 items-center gap-2 border-t border-border/60 pt-3 md:gap-3 md:border-0 md:border-l md:border-border/60 md:pl-4 md:pt-0">
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg">
+            <span className="text-[11px] font-medium text-text-secondary">{source.is_enabled ? "Copying" : "Off"}</span>
+            <Toggle on={source.is_enabled} onChange={onToggleEnabled} label="Copying enabled" />
+          </label>
+          <button
+            onClick={onKill}
+            title="Kill switch — pause channel"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-loss/30 bg-loss/[0.07] text-loss transition-colors hover:bg-loss/15"
+          >
+            <OctagonX size={17} />
+          </button>
+          <button
+            onClick={onToggleExpand}
+            title={expanded ? "Collapse" : "Settings"}
+            className={`flex h-9 items-center gap-1 rounded-lg border px-2.5 text-[12px] font-medium transition-colors ${
+              expanded
+                ? "border-primary/30 bg-primary/10 text-primary-light"
+                : "border-border bg-surface-elevated text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <SlidersHorizontal size={15} />
+            <ChevronDown size={14} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Collapsed inline settings strip */}
+      {!expanded && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-bg/20 px-4 py-2.5 sm:px-5">
+          <InlineSetting
+            icon={Gauge}
+            label="Risk"
+            value={source.override_risk_enabled && source.override_risk_pct != null ? `${source.override_risk_pct}%` : "global"}
+            custom={source.override_risk_enabled}
+          />
+          <InlineSetting
+            icon={ListFilter}
+            label="Daily limit"
+            value={source.daily_signal_limit != null ? `${source.daily_signal_limit}/day` : "global"}
+            custom={source.daily_signal_limit != null}
+          />
+          <InlineSetting
+            icon={ShieldHalf}
+            label="SL"
+            value={source.sl_policy === "require" ? "Require" : source.sl_policy === "apply_default" ? "Auto" : "global"}
+            custom={source.sl_policy != null}
+          />
+          {source.reverse_trades && (
+            <InlineSetting icon={Repeat2} label="" value="Reversed" custom />
+          )}
+        </div>
+      )}
+
+      {expanded && (
+        <OverridePanel
+          source={source}
+          globalRiskPct={globalRiskPct}
+          globalDailyLimit={globalDailyLimit}
+          brokerLabel={brokerLabel}
+          onPatch={onPatch}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─── Empty state ───────────────────────────────────────────────────────────── */
+
+function EmptyState({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div className="anim-fade flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface/50 px-6 py-16 text-center">
+      <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary-light">
+        <Send size={28} />
+        <span className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-bg bg-surface-elevated text-primary-light">
+          <Plus size={14} strokeWidth={2.5} />
+        </span>
+      </span>
+      <h3 className="mt-5 text-[18px] font-bold tracking-tight text-text-primary">No channels yet</h3>
+      <p className="mt-1.5 max-w-sm text-[13.5px] leading-relaxed text-text-secondary">
+        Connect a Telegram signal channel and VouchFX will parse every signal and copy it onto your MT5 account under your risk rules.
+      </p>
+      <button
+        onClick={onAdd}
+        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-[13.5px] font-semibold text-[#04201D] transition-colors hover:bg-primary-light"
+      >
+        <Plus size={17} strokeWidth={2.5} /> Add your first channel
+      </button>
+      <div className="num mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-text-muted">
+        <span className="inline-flex items-center gap-1.5"><ShieldCheck size={12} className="text-primary-light" /> Read-only Telegram</span>
+        <span className="inline-flex items-center gap-1.5"><Zap size={12} className="text-primary-light" /> AI-parsed signals</span>
+        <span className="inline-flex items-center gap-1.5"><Gauge size={12} className="text-primary-light" /> Your risk rules</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Summary strip ─────────────────────────────────────────────────────────── */
+
+function SummaryStrip({ sources }: { sources: ChannelSource[] }) {
+  const live = sources.filter((s) => statusOf(s).live).length;
+  const paused = sources.filter((s) => !s.is_enabled).length;
+  const signals = sources.reduce((a, s) => a + s.signals_today, 0);
+  const stats: [string, number, React.ElementType, string][] = [
+    ["Channels", sources.length, Send, "text-text-primary"],
+    ["Live", live, CircleCheck, "text-profit"],
+    ["Paused", paused, PauseCircle, "text-warning"],
+    ["Signals today", signals, Zap, "text-text-primary"],
+  ];
+  return (
+    <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {stats.map(([label, val, Icon, color]) => (
+        <div key={label} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3.5 py-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-elevated">
+            <Icon size={16} className={color} />
+          </span>
+          <div className="min-w-0">
+            <div className={`num text-[19px] font-bold leading-none ${color}`}>{val}</div>
+            <div className="mt-1 truncate text-[11px] text-text-muted">{label}</div>
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-// ─── SignalMeter ──────────────────────────────────────────────────────────────
+/* ─── Main list ─────────────────────────────────────────────────────────────── */
 
-function SignalMeter({ used, limit }: { used: number; limit: number }) {
-  const full = used >= limit;
-  const dots = Math.min(limit, 8);
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex gap-0.5" aria-hidden="true">
-        {Array.from({ length: dots }).map((_, i) => (
-          <span
-            key={i}
-            className={`h-3 w-1 rounded-full ${
-              i < used ? (full ? "bg-warning" : "bg-primary") : "bg-border"
-            }`}
-          />
-        ))}
-        {limit > 8 && <span className="text-[10px] text-text-muted">…</span>}
-      </div>
-      <span className={`num text-[11px] tabular-nums ${full ? "text-warning" : "text-text-muted"}`}>
-        {used}/{limit}
-      </span>
-    </div>
-  );
-}
+export default function ChannelList({ initialSources, globalRiskPct, globalDailyLimit, brokerLabel }: ChannelListProps) {
+  const [sources, setSources] = useState<ChannelSource[]>(initialSources);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [killTarget, setKillTarget] = useState<ChannelSource | null>(null);
+  const [killing, setKilling] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-// ─── OverridePanel ────────────────────────────────────────────────────────────
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastRef.current) clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 2600);
+  }, []);
 
-function OverridePanel({
-  source,
-  onSave,
-}: {
-  source: ChannelSource;
-  onSave: (id: string, updates: Partial<ChannelSource>) => void;
-}) {
-  const [riskEnabled, setRiskEnabled] = useState(source.override_risk_enabled);
-  const [riskPct, setRiskPct] = useState<number>(source.override_risk_pct ?? 0.5);
-  const [saving, setSaving] = useState(false);
-  const dirty =
-    riskEnabled !== source.override_risk_enabled ||
-    (riskEnabled && riskPct !== (source.override_risk_pct ?? 0.5));
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/channels/${source.id}`, {
+  const patch = useCallback(
+    async (id: string, body: Record<string, unknown>, optimistic: Partial<ChannelSource>) => {
+      setSources((prev) => prev.map((s) => (s.id === id ? { ...s, ...optimistic } : s)));
+      const res = await fetch(`/api/channels/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          override_risk_enabled: riskEnabled,
-          override_risk_pct: riskEnabled ? riskPct : null,
-        }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) {
-        onSave(source.id, {
-          override_risk_enabled: riskEnabled,
-          override_risk_pct: riskEnabled ? riskPct : null,
-        });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        flash((json.error as string) ?? "Update failed");
       }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="border-t border-border/50 bg-surface-elevated/30 px-4 py-4 space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-text-primary">Risk override</p>
-          <p className="text-xs text-text-muted mt-0.5">
-            Override global risk % for this channel only.
-          </p>
-        </div>
-        {/* Toggle */}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={riskEnabled}
-          onClick={() => setRiskEnabled(!riskEnabled)}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-            riskEnabled ? "bg-primary" : "bg-border"
-          }`}
-        >
-          <span className="sr-only">Risk override</span>
-          <span
-            className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-              riskEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
-            }`}
-          />
-        </button>
-      </div>
-
-      {riskEnabled && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={0.1}
-              max={3}
-              step={0.1}
-              value={riskPct}
-              onChange={(e) => setRiskPct(Number(e.target.value))}
-              className="flex-1 h-1.5 cursor-pointer rounded-full accent-primary"
-            />
-            <span className="num w-12 text-right text-sm font-semibold text-text-primary tabular-nums">
-              {riskPct.toFixed(1)}%
-            </span>
-          </div>
-          <p className="text-xs text-text-muted">
-            Applies instead of the global risk % for every signal from this channel.
-          </p>
-        </div>
-      )}
-
-      {dirty && (
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-[#04201D] hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
-          {saving && <Loader2 size={11} className="animate-spin" />}
-          Save override
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ─── KillModal ────────────────────────────────────────────────────────────────
-
-type KillAction = "keep" | "close_all";
-
-function KillModal({
-  title,
-  onClose,
-  onConfirm,
-  confirming,
-}: {
-  title: string;
-  onClose: () => void;
-  onConfirm: (action: KillAction) => void;
-  confirming: boolean;
-}) {
-  const [choice, setChoice] = useState<KillAction>("keep");
-
-  const options: { value: KillAction; label: string; sub: string; Icon: typeof Pause }[] = [
-    {
-      value: "keep",
-      label: "Pause & keep trades open",
-      sub: "Stop copying new signals. Your open positions continue under their existing SL/TP — manage them from the Dashboard.",
-      Icon: Pause,
     },
-    {
-      value: "close_all",
-      label: "Pause & close all positions",
-      sub: "Stop copying AND immediately close every open and pending position from this channel.",
-      Icon: TrendingDown,
-    },
-  ];
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-md rounded-2xl border border-border bg-surface-elevated p-6 shadow-2xl">
-        <div className="flex items-center gap-2 mb-1">
-          <Zap size={16} className="text-warning" />
-          <h3 className="text-[15px] font-bold text-text-primary">
-            Kill switch — {title}
-          </h3>
-        </div>
-        <p className="text-sm text-text-muted mb-4">
-          Choose what happens to your open positions when this channel is paused.
-        </p>
-
-        <div className="space-y-2">
-          {options.map(({ value, label, sub, Icon }) => (
-            <label
-              key={value}
-              className={`flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors ${
-                choice === value
-                  ? "border-primary/40 bg-primary/[0.05]"
-                  : "border-border hover:border-border/80 bg-surface/50"
-              }`}
-            >
-              <div className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-border transition-colors">
-                {choice === value && (
-                  <div className="h-2 w-2 rounded-full bg-primary" />
-                )}
-                <input
-                  type="radio"
-                  className="sr-only"
-                  checked={choice === value}
-                  onChange={() => setChoice(value)}
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <Icon size={13} className={value === "close_all" ? "text-loss" : "text-warning"} />
-                  <p className="text-sm font-medium text-text-primary">{label}</p>
-                </div>
-                <p className="mt-0.5 text-xs text-text-muted leading-relaxed">{sub}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-
-        <div className="mt-5 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-elevated disabled:opacity-50"
-            disabled={confirming}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => onConfirm(choice)}
-            disabled={confirming}
-            className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-all disabled:opacity-60 ${
-              choice === "close_all"
-                ? "bg-loss/90 text-white hover:bg-loss"
-                : "bg-primary text-[#04201D] hover:opacity-90"
-            }`}
-          >
-            {confirming && <Loader2 size={13} className="animate-spin" />}
-            {choice === "close_all" ? "Pause & close all" : "Pause channel"}
-          </button>
-        </div>
-      </div>
-    </div>
+    [flash]
   );
-}
 
-// ─── LimitEditor — inline editable daily limit ───────────────────────────────
-
-function LimitEditor({
-  sourceId,
-  current,
-  onUpdate,
-}: {
-  sourceId: string;
-  current: number | null;
-  onUpdate: (id: string, limit: number | null) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(String(current ?? ""));
-  const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function startEdit() {
-    setValue(String(current ?? ""));
-    setEditing(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  }
-
-  async function commit() {
-    const limit = value.trim() === "" || value === "0" ? null : parseInt(value, 10);
-    if (limit !== null && (isNaN(limit) || limit < 1)) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/channels/${sourceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ daily_signal_limit: limit }),
-      });
-      if (res.ok) onUpdate(sourceId, limit);
-    } finally {
-      setSaving(false);
-      setEditing(false);
-    }
-  }
-
-  if (saving) return <Loader2 size={12} className="animate-spin text-text-muted" />;
-
-  if (editing) {
-    return (
-      <div className="flex items-center gap-1">
-        <input
-          ref={inputRef}
-          type="number"
-          min={0}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          className="num w-16 rounded border border-primary bg-surface-elevated px-1.5 py-0.5 text-xs text-text-primary tabular-nums focus:outline-none"
-          placeholder="0 = ∞"
-          autoFocus
-        />
-        <button
-          onClick={() => setEditing(false)}
-          className="text-text-muted hover:text-text-secondary text-xs"
-          aria-label="Cancel"
-        >
-          ✕
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      onClick={startEdit}
-      className="text-xs text-text-muted hover:text-text-secondary transition-colors"
-      title="Set per-channel signal limit"
-    >
-      {current ? `${current}/day` : "no limit"}
-    </button>
-  );
-}
-
-// ─── PromoteButton ────────────────────────────────────────────────────────────
-
-function PromoteButton({
-  sourceId,
-  onPromote,
-}: {
-  sourceId: string;
-  onPromote: (id: string) => void;
-}) {
-  const [promoting, setPromoting] = useState(false);
-
-  async function handlePromote() {
-    setPromoting(true);
-    try {
-      const res = await fetch(`/api/channels/${sourceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ promote_to_live: true }),
-      });
-      if (res.ok) onPromote(sourceId);
-    } finally {
-      setPromoting(false);
-    }
-  }
-
-  return (
-    <button
-      onClick={handlePromote}
-      disabled={promoting}
-      className="flex items-center gap-1 text-xs text-primary hover:opacity-80 disabled:opacity-50 transition-opacity"
-      title="Switch this channel to live trading"
-    >
-      {promoting
-        ? <Loader2 size={11} className="animate-spin" />
-        : <ArrowUpCircle size={11} />
+  const handleToggleEnabled = useCallback(
+    (source: ChannelSource, v: boolean) => {
+      if (!v) {
+        // Disabling → kill-switch decision
+        setKillTarget(source);
+      } else {
+        patch(source.id, { is_enabled: true }, { is_enabled: true });
+        flash(`${titleOf(source)} resumed`);
       }
-      <span>Go live</span>
-    </button>
+    },
+    [patch, flash]
   );
-}
 
-// ─── ChannelRow ───────────────────────────────────────────────────────────────
-
-function ChannelRow({
-  chatId,
-  title,
-  isChannel,
-  isMegagroup,
-  participantsCount,
-  source,
-  expanded,
-  onToggleExpand,
-  onRequestKill,
-  onLimitUpdate,
-  onPromote,
-  onOverrideSave,
-}: TelegramDialog & {
-  source: ChannelSource | undefined;
-  expanded: boolean;
-  onToggleExpand: (chatId: string) => void;
-  onRequestKill: (source: ChannelSource, title: string) => void;
-  onLimitUpdate: (id: string, limit: number | null) => void;
-  onPromote: (id: string) => void;
-  onOverrideSave: (id: string, updates: Partial<ChannelSource>) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const enabled = source?.is_enabled ?? false;
-  const demo = source ? isDemo(source) : false;
-  const daysLeft = demo && source?.demo_until ? demoDaysLeft(source.demo_until) : 0;
-
-  // Toggling ON = add channel (POST /api/channels)
-  // Toggling OFF = show KillModal (handled by parent)
-  async function handleToggleOn() {
-    if (!source) {
-      setBusy(true);
+  const handleKillConfirm = useCallback(
+    async (action: KillAction) => {
+      if (!killTarget) return;
+      setKilling(true);
+      const title = titleOf(killTarget);
       try {
-        const res = await fetch("/api/channels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ telegram_chat_id: chatId, title }),
-        });
-        const json = await res.json();
-        if (res.ok) {
-          // Parent will refresh local state via onToggleExpand context — but we
-          // need a real add callback. Re-use onLimitUpdate channel to signal a
-          // full-add by passing the new source back through a no-op approach.
-          // Simpler: reload the page or let the parent handle it.
-          // For now, we rely on the parent's discover flow to refresh.
-          window.location.reload();
+        if (action === "keep") {
+          await patch(killTarget.id, { is_enabled: false }, { is_enabled: false });
+          flash(`${title} paused — trades kept open`);
         } else {
-          console.error("Failed to add channel:", json.error);
+          const res = await fetch(`/api/channels/${killTarget.id}`, { method: "POST" });
+          if (res.ok) {
+            // Executor closes the trades and removes the source
+            setSources((prev) => prev.filter((s) => s.id !== killTarget.id));
+            flash(`${title} paused — closing all trades`);
+          } else {
+            flash("Kill switch failed — try again");
+          }
         }
       } finally {
-        setBusy(false);
+        setKilling(false);
+        setKillTarget(null);
       }
-    }
-  }
-
-  function handleToggle() {
-    if (source && enabled) {
-      // Disabling — show KillModal
-      onRequestKill(source, title);
-    } else if (!source) {
-      handleToggleOn();
-    }
-  }
-
-  const canExpand = !!source;
-
-  return (
-    <div className="border-b border-border last:border-0">
-      {/* Main row */}
-      <div className="flex items-start gap-3 px-4 py-3">
-        {/* Icon */}
-        <div className="mt-0.5 shrink-0">
-          {isChannel && !isMegagroup
-            ? <Megaphone size={14} className="text-text-muted" />
-            : <Hash size={14} className="text-text-muted" />
-          }
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-medium text-text-primary truncate">{title}</p>
-            {demo && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
-                <FlaskConical size={10} />
-                Demo · {daysLeft}d
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-            <p className="text-xs text-text-muted">
-              {isChannel && !isMegagroup ? "Channel" : isMegagroup ? "Supergroup" : "Group"}
-              {participantsCount !== null && ` · ${formatMembers(participantsCount)}`}
-            </p>
-            {source && (
-              <LimitEditor
-                sourceId={source.id}
-                current={source.daily_signal_limit}
-                onUpdate={onLimitUpdate}
-              />
-            )}
-            {source && source.daily_signal_limit !== null && source.daily_signal_limit > 0 && (
-              <SignalMeter
-                used={source.signals_today}
-                limit={source.daily_signal_limit}
-              />
-            )}
-            {demo && source && (
-              <PromoteButton sourceId={source.id} onPromote={onPromote} />
-            )}
-          </div>
-        </div>
-
-        {/* Right: expand chevron + toggle */}
-        <div className="flex items-center gap-2 shrink-0">
-          {canExpand && (
-            <button
-              onClick={() => onToggleExpand(chatId)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-surface-elevated hover:text-text-secondary"
-              aria-label={expanded ? "Collapse settings" : "Expand settings"}
-            >
-              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-          )}
-          <button
-            onClick={handleToggle}
-            disabled={busy}
-            aria-label={enabled ? `Disable ${title}` : `Enable ${title}`}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${
-              enabled ? "bg-primary" : "bg-border"
-            }`}
-          >
-            {busy ? (
-              <Loader2 size={10} className="absolute inset-0 m-auto animate-spin text-white" />
-            ) : (
-              <span
-                className={`pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-                  enabled ? "translate-x-[18px]" : "translate-x-[2px]"
-                }`}
-              />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Override panel (expand on chevron click) */}
-      {canExpand && expanded && source && (
-        <OverridePanel source={source} onSave={onOverrideSave} />
-      )}
-    </div>
+    },
+    [killTarget, patch, flash]
   );
-}
 
-// ─── ChannelList ─────────────────────────────────────────────────────────────
+  const handleAdded = useCallback(
+    (s: ChannelSource) => {
+      setSources((prev) => [s, ...prev]);
+      setAddOpen(false);
+      flash(`${titleOf(s)} added`);
+    },
+    [flash]
+  );
 
-export default function ChannelList({ initialSources }: ChannelListProps) {
-  const [sources, setSources]       = useState<ChannelSource[]>(initialSources);
-  const [dialogs, setDialogs]       = useState<TelegramDialog[] | null>(null);
-  const [discovering, setDiscovering] = useState(false);
-  const [discoverError, setDiscoverError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [killTarget, setKillTarget] = useState<{ source: ChannelSource; title: string } | null>(null);
-  const [killing, setKilling]       = useState(false);
-
-  const sourceMap = new Map(sources.map(s => [String(s.telegram_chat_id), s]));
-
-  async function discover() {
-    setDiscovering(true);
-    setDiscoverError(null);
-    try {
-      const res = await fetch("/api/telegram/channels");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to load channels");
-      setDialogs(json.channels as TelegramDialog[]);
-    } catch (err) {
-      setDiscoverError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDiscovering(false);
-    }
-  }
-
-  const handleToggleExpand = useCallback((chatId: string) => {
-    setExpandedId(prev => prev === chatId ? null : chatId);
-  }, []);
-
-  const handleRequestKill = useCallback((source: ChannelSource, title: string) => {
-    setKillTarget({ source, title });
-  }, []);
-
-  const handleKillConfirm = useCallback(async (action: KillAction) => {
-    if (!killTarget) return;
-    setKilling(true);
-    try {
-      if (action === "keep") {
-        // Hard-delete: just remove the source row
-        const res = await fetch(`/api/channels/${killTarget.source.id}`, { method: "DELETE" });
-        if (res.ok || res.status === 204) {
-          setSources(prev => prev.filter(s => s.id !== killTarget.source.id));
-        }
-      } else {
-        // Kill-close: soft-disable + set flag for executor to close all trades
-        const res = await fetch(`/api/channels/${killTarget.source.id}`, { method: "POST" });
-        if (res.ok) {
-          // Optimistically remove from UI — executor handles the actual close
-          setSources(prev => prev.filter(s => s.id !== killTarget.source.id));
-        }
-      }
-    } finally {
-      setKilling(false);
-      setKillTarget(null);
-    }
-  }, [killTarget]);
-
-  const handleLimitUpdate = useCallback((id: string, limit: number | null) => {
-    setSources(prev => prev.map(s => s.id === id ? { ...s, daily_signal_limit: limit } : s));
-  }, []);
-
-  const handlePromote = useCallback((id: string) => {
-    setSources(prev => prev.map(s => s.id === id ? { ...s, demo_until: null } : s));
-  }, []);
-
-  const handleOverrideSave = useCallback((id: string, updates: Partial<ChannelSource>) => {
-    setSources(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
-  }, []);
-
-  const rows: (TelegramDialog & { source: ChannelSource | undefined })[] = dialogs
-    ? dialogs.map(d => ({ ...d, source: sourceMap.get(d.chatId) }))
-    : sources.map(s => ({
-        chatId:            String(s.telegram_chat_id),
-        title:             s.title ?? `Chat ${s.telegram_chat_id}`,
-        isChannel:         false,
-        isMegagroup:       false,
-        participantsCount: null,
-        source:            s,
-      }));
+  const existingChatIds = new Set(sources.map((s) => s.telegram_chat_id));
 
   return (
-    <div className="space-y-4">
-      {/* Summary strip — only when we have sources */}
-      {sources.length > 0 && <SummaryStrip sources={sources} />}
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-text-primary">Signal channels</p>
-          <p className="text-xs text-text-secondary">
-            {sources.filter(s => s.is_enabled).length === 0
-              ? "No channels enabled — discover and toggle to start copying."
-              : `${sources.filter(s => s.is_enabled).length} channel${sources.filter(s => s.is_enabled).length !== 1 ? "s" : ""} enabled`
-            }
-          </p>
-        </div>
+    <div className="mt-6">
+      {/* Add button row */}
+      <div className="mb-5 flex items-center justify-end">
         <button
-          onClick={discover}
-          disabled={discovering}
-          className="flex items-center gap-1.5 text-xs text-primary hover:opacity-80 disabled:opacity-50"
+          onClick={() => setAddOpen(true)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3.5 text-[13px] font-semibold text-[#04201D] transition-colors hover:bg-primary-light"
         >
-          {discovering
-            ? <Loader2 size={12} className="animate-spin" />
-            : <RefreshCw size={12} />
-          }
-          {dialogs ? "Refresh" : "Discover channels"}
+          <Plus size={16} strokeWidth={2.5} /> Add channel
         </button>
       </div>
 
-      {discoverError && (
-        <div className="flex items-start gap-2 rounded-lg border border-loss/30 bg-red-900/20 px-3 py-2 text-xs text-loss">
-          <AlertCircle size={12} className="mt-0.5 shrink-0" />
-          <span>{discoverError}</span>
-        </div>
-      )}
+      {sources.length > 0 && <SummaryStrip sources={sources} />}
 
-      {rows.length > 0 ? (
-        <div className="overflow-hidden rounded-xl border border-border bg-surface">
-          {rows.map(row => (
-            <ChannelRow
-              key={row.chatId}
-              {...row}
-              expanded={expandedId === row.chatId}
-              onToggleExpand={handleToggleExpand}
-              onRequestKill={handleRequestKill}
-              onLimitUpdate={handleLimitUpdate}
-              onPromote={handlePromote}
-              onOverrideSave={handleOverrideSave}
+      {sources.length === 0 ? (
+        <EmptyState onAdd={() => setAddOpen(true)} />
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {sources.map((s) => (
+            <ChannelCard
+              key={s.id}
+              source={s}
+              globalRiskPct={globalRiskPct}
+              globalDailyLimit={globalDailyLimit}
+              brokerLabel={brokerLabel}
+              expanded={expandedId === s.id}
+              onToggleExpand={() => setExpandedId((prev) => (prev === s.id ? null : s.id))}
+              onToggleEnabled={(v) => handleToggleEnabled(s, v)}
+              onKill={() => setKillTarget(s)}
+              onPatch={patch}
             />
           ))}
-        </div>
-      ) : !discovering && (
-        <div className="card p-8 text-center space-y-2">
-          <Radio size={24} className="mx-auto text-text-muted" />
-          <p className="text-sm text-text-muted">No channels yet.</p>
-          <p className="text-xs text-text-muted">
-            Click <strong className="text-text-secondary">Discover channels</strong> to load all
-            Telegram channels and groups you belong to.
-          </p>
-        </div>
-      )}
-
-      {discovering && rows.length === 0 && (
-        <div className="card p-8 flex flex-col items-center gap-3">
-          <Loader2 size={24} className="animate-spin text-primary" />
-          <p className="text-xs text-text-secondary">
-            Connecting to Telegram to load your channels…
-          </p>
+          <button
+            onClick={() => setAddOpen(true)}
+            className="group flex items-center justify-center gap-2.5 rounded-2xl border border-dashed border-border bg-surface/40 px-4 py-5 text-[13.5px] font-semibold text-text-secondary transition-colors hover:border-primary/40 hover:bg-primary/[0.04] hover:text-text-primary"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-elevated text-primary-light transition-colors group-hover:border-primary/40">
+              <Plus size={17} strokeWidth={2.5} />
+            </span>
+            Add another channel
+          </button>
         </div>
       )}
 
-      {/* Kill-switch modal */}
       {killTarget && (
         <KillModal
-          title={killTarget.title}
+          title={titleOf(killTarget)}
+          busy={killing}
           onClose={() => setKillTarget(null)}
           onConfirm={handleKillConfirm}
-          confirming={killing}
         />
+      )}
+      {addOpen && (
+        <AddModal existingChatIds={existingChatIds} onClose={() => setAddOpen(false)} onAdded={handleAdded} />
+      )}
+
+      {toast && (
+        <div className="anim-fade fixed bottom-20 left-1/2 z-[60] -translate-x-1/2 lg:bottom-6">
+          <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface-elevated px-4 py-3 shadow-2xl">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary-light">
+              <Check size={14} strokeWidth={2.5} />
+            </span>
+            <span className="text-[13px] font-medium text-text-primary">{toast}</span>
+          </div>
+        </div>
       )}
     </div>
   );

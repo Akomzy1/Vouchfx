@@ -55,7 +55,6 @@ export interface UserRow {
   stripe_customer_id: string | null;
   paystack_customer_code: string | null;
   onboarding_completed_at: string | null;
-  demo_mode_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +66,10 @@ export interface BrokerConnectionRow {
   platform: Platform;
   label: string | null;
   is_active: boolean;
+  /** The account new signals route to. At most one per user. */
+  is_primary: boolean;
+  /** demo | live — from MetaApi account info; null until first sync. */
+  account_mode: "demo" | "live" | null;
   last_balance_usd: number | null;
   last_equity_usd: number | null;
   last_synced_at: string | null;
@@ -81,7 +84,13 @@ export interface SignalSourceRow {
   title: string | null;
   is_enabled: boolean;
   daily_signal_limit: number | null;
-  demo_until: string | null;
+  override_risk_enabled: boolean;
+  override_risk_pct: number | null;
+  /** Per-channel no-SL policy: null = inherit global. */
+  sl_policy: "require" | "apply_default" | null;
+  /** Flip BUY/SELL for this channel (SL/TP swapped on reverse). */
+  reverse_trades: boolean;
+  kill_close_requested_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -351,6 +360,34 @@ export type PropRuleAuditInsert =
   Pick<PropRuleAuditRow, "firm_id" | "action" | "actor"> &
   Partial<Pick<PropRuleAuditRow, "id" | "ruleset_id" | "old_values" | "new_values" | "source_url" | "agent_confidence">>;
 
+// ── Economic calendar cache (migration 026, VCH-RSK-06b/06c) ─────────────────
+
+export type CalendarImpact = "high" | "medium" | "low" | "holiday";
+export type CalendarSource = "jblanked" | "forexfactory";
+export type CalendarFetchStatus = "success" | "error" | "rate_limited" | "network_error";
+
+export interface CalendarEventRow {
+  id: string;
+  event_name: string;
+  /** ISO currency ('USD', 'EUR', …) or 'All' for global events. */
+  currency: string;
+  /** Always UTC — converted at ingest. */
+  event_time_utc: string;
+  impact: CalendarImpact;
+  forecast: string | null;
+  previous: string | null;
+  source: CalendarSource;
+  fetched_at: string;
+}
+
+export interface CalendarFetchLogRow {
+  id: string;
+  source: CalendarSource;
+  status: CalendarFetchStatus;
+  fetched_at: string;
+  error: string | null;
+}
+
 // ── Insert types (required fields only; optional fields nullable/defaulted) ───
 
 export type UserInsert = Pick<UserRow, "email"> &
@@ -402,6 +439,14 @@ export type AffiliateAccountInsert =
 export type PayoutInsert =
   Pick<PayoutRow, "affiliate_account_id" | "user_id" | "amount_usd" | "status" | "method"> &
   Partial<Pick<PayoutRow, "id" | "provider_transfer_id" | "paid_at">>;
+
+export type CalendarEventInsert =
+  Pick<CalendarEventRow, "event_name" | "currency" | "event_time_utc" | "impact" | "source"> &
+  Partial<Pick<CalendarEventRow, "id" | "forecast" | "previous" | "fetched_at">>;
+
+export type CalendarFetchLogInsert =
+  Pick<CalendarFetchLogRow, "source" | "status"> &
+  Partial<Pick<CalendarFetchLogRow, "id" | "fetched_at" | "error">>;
 
 // ── Supabase Database type ────────────────────────────────────────────────────
 
@@ -499,6 +544,16 @@ export interface Database {
         Row: PropRuleAuditRow;
         Insert: PropRuleAuditInsert;
         Update: Partial<PropRuleAuditInsert>;
+      } & NoRelationships;
+      calendar_events: {
+        Row: CalendarEventRow;
+        Insert: CalendarEventInsert;
+        Update: Partial<CalendarEventInsert>;
+      } & NoRelationships;
+      calendar_fetch_log: {
+        Row: CalendarFetchLogRow;
+        Insert: CalendarFetchLogInsert;
+        Update: Partial<CalendarFetchLogInsert>;
       } & NoRelationships;
     };
     Views: Record<string, never>;

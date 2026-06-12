@@ -54,6 +54,42 @@ export default async function AdminHealthPage() {
     (svc as any).from("worker_heartbeats").select("worker_id, worker_type, last_seen_at, metadata"),
   ]);
 
+  // Calendar feed health (VCH-RSK-06b)
+  const [{ data: fetchLog }, { data: newestEvent }] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any)
+      .from("calendar_fetch_log")
+      .select("source, status, fetched_at, error")
+      .order("fetched_at", { ascending: false })
+      .limit(50),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (svc as any)
+      .from("calendar_events")
+      .select("fetched_at")
+      .order("fetched_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const logRows = (fetchLog ?? []) as any[];
+  const calendarFeeds = (["jblanked", "forexfactory"] as const).map((source) => {
+    const rows = logRows.filter((r) => r.source === source);
+    const lastSuccess = rows.find((r) => r.status === "success");
+    const lastAttempt = rows[0];
+    return {
+      source: source as string,
+      last_success_at: (lastSuccess?.fetched_at as string | null) ?? null,
+      last_attempt_at: (lastAttempt?.fetched_at as string | null) ?? null,
+      last_status: (lastAttempt?.status as string | null) ?? null,
+      last_error: (lastAttempt?.error as string | null) ?? null,
+    };
+  });
+  const newestEventFetchedAt =
+    (newestEvent as { fetched_at: string } | null)?.fetched_at ?? null;
+  const calendarStale = !newestEventFetchedAt ||
+    Date.now() - new Date(newestEventFetchedAt).getTime() > 48 * 3_600_000;
+
   // Build per-user health
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sessionMap = new Map<string, any>();
@@ -110,6 +146,14 @@ export default async function AdminHealthPage() {
   }));
 
   return (
-    <AdminHealthClient users={userHealth} workers={workerHealth} />
+    <AdminHealthClient
+      users={userHealth}
+      workers={workerHealth}
+      calendar={{
+        feeds: calendarFeeds,
+        newestEventFetchedAt,
+        stale: calendarStale,
+      }}
+    />
   );
 }

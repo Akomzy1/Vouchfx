@@ -6,6 +6,7 @@ export const NOTIFY_EVENTS = [
   "trade_closed",
   "prop_rule_proposal",
   "prop_rule_published",
+  "calendar_failsafe",
 ] as const;
 
 export type NotifyEventType = (typeof NOTIFY_EVENTS)[number];
@@ -23,4 +24,5 @@ export const NOTIFY_EVENT_META: Record<NotifyEventType, NotifyEventMeta> = {
   trade_closed:              { title: "Trade closed",                  description: "Alert each time a position is closed." },
   prop_rule_proposal:        { title: "New rule proposal",             description: "Alert (approvers) when the Rule Monitor detects a rule change." },
   prop_rule_published:       { title: "Prop rules updated",            description: "Alert when a rule change is published for your prop challenge." },
+  calendar_failsafe:         { title: "Calendar fail-safe",            description: "Alert (ops) when the economic-calendar cache goes stale and conservative news blocks engage." },
 };

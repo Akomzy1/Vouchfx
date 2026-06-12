@@ -46,6 +46,13 @@ export default function StepBroker({ onComplete, onSkip }: Props) {
         </p>
       </div>
 
+      {/* Demo-account note (PRD R6: demo and live are treated identically) */}
+      <p className="rounded-lg border border-border bg-surface-elevated/60 px-3 py-2.5 text-xs leading-relaxed text-text-secondary">
+        Want to test first? Connect your broker&rsquo;s{" "}
+        <strong className="text-text-primary">free demo account</strong> — VouchFX works identically
+        on demo and live.
+      </p>
+
       <form onSubmit={handleConnect} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">

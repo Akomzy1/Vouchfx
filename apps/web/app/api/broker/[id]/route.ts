@@ -20,9 +20,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 
   // Fetch the row (RLS ensures it belongs to this user)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: conn, error: fetchErr } = await (supabase as any)
+  const db = supabase as any;
+  const { data: conn, error: fetchErr } = await db
     .from("broker_connections")
-    .select("id, metaapi_account_id")
+    .select("id, metaapi_account_id, is_primary")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -40,13 +41,29 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: delErr } = await (supabase as any)
+  const { error: delErr } = await db
     .from("broker_connections")
     .delete()
     .eq("id", id)
     .eq("user_id", user.id);
 
   if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
+
+  // If we removed the primary, promote the oldest remaining account so signals
+  // keep routing deterministically (matches the listener's fallback order).
+  if (conn.is_primary) {
+    const { data: successor } = await db
+      .from("broker_connections")
+      .select("id")
+      .eq("user_id", user.id)
+      .order("is_active", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (successor) {
+      await db.from("broker_connections").update({ is_primary: true }).eq("id", successor.id);
+    }
+  }
+
   return new NextResponse(null, { status: 204 });
 }

@@ -23,7 +23,7 @@ export default async function SettingsPage() {
   const [{ data: brokerConnections }, { data: notifPrefs }] = await Promise.all([
     db
       .from("broker_connections")
-      .select("id, label, platform, is_active, status, server_hint, last_status_at, created_at")
+      .select("id, label, platform, is_active, status, account_mode, server_hint, last_status_at, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     db

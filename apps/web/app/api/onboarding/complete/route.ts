@@ -6,10 +6,8 @@ export async function POST(request: Request) {
   const { data: { user } } = await db.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { demoMode?: unknown; referralCode?: unknown };
+  let body: { referralCode?: unknown };
   try { body = await request.json(); } catch { body = {}; }
-
-  const demoMode = body.demoMode === true;
 
   // Apply late referral code if provided (user typed it on step 1 but didn't use the link)
   if (typeof body.referralCode === "string" && body.referralCode.trim()) {
@@ -26,10 +24,7 @@ export async function POST(request: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (db as any)
     .from("users")
-    .update({
-      onboarding_completed_at: new Date().toISOString(),
-      demo_mode_enabled: demoMode,
-    })
+    .update({ onboarding_completed_at: new Date().toISOString() })
     .eq("id", user.id);
 
   return NextResponse.json({ ok: true });

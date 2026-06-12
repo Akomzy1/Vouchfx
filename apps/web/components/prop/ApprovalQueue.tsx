@@ -2,14 +2,12 @@
 
 import { useState, useCallback } from "react";
 import {
-  CheckCircle2, XCircle, Edit3, ExternalLink,
-  AlertTriangle, Info, ChevronDown, ChevronUp, Loader2,
+  Check, X, PencilLine, ExternalLink, ArrowRight, Loader2,
+  ShieldAlert, Feather, Tag, CircleCheckBig, CircleDashed, CircleHelp,
+  GitCompareArrows, CalendarClock, Cpu, CircleCheck, CircleSlash,
+  TriangleAlert,
 } from "lucide-react";
-import {
-  classifyProposalStakes,
-  isMorePermissive,
-  stakesLabel,
-} from "@vouchfx/core";
+import { classifyProposalStakes } from "@vouchfx/core";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,19 +41,17 @@ function timeAgo(iso: string): string {
 function formatFieldValue(field: string, val: unknown): string {
   if (val === null || val === undefined) return "—";
   if (typeof val === "boolean") return val ? "Yes" : "No";
-  if (["daily_loss_pct", "max_drawdown_pct", "consistency_pct"].includes(field))
-    return `${val}%`;
-  if (["news_before_min", "news_after_min"].includes(field))
-    return `${val} min`;
+  if (["daily_loss_pct", "max_drawdown_pct", "consistency_pct"].includes(field)) return `${val}%`;
+  if (["news_before_min", "news_after_min"].includes(field)) return `${val} min`;
   return String(val);
 }
 
 function fieldLabel(field: string): string {
   const labels: Record<string, string> = {
-    daily_loss_pct:          "Daily loss",
+    daily_loss_pct:          "Daily loss limit",
     daily_loss_basis:        "Daily loss basis",
     max_drawdown_pct:        "Max drawdown",
-    max_drawdown_model:      "Drawdown model",
+    max_drawdown_model:      "Max drawdown model",
     consistency_pct:         "Consistency cap",
     news_before_min:         "News window (before)",
     news_after_min:          "News window (after)",
@@ -66,129 +62,157 @@ function fieldLabel(field: string): string {
   return labels[field] ?? field;
 }
 
-// ── Diff Table ────────────────────────────────────────────────────────────────
+function categoryLabel(field: string): string {
+  const cats: Record<string, string> = {
+    daily_loss_pct: "Daily loss",
+    daily_loss_basis: "Daily loss",
+    max_drawdown_pct: "Max drawdown",
+    max_drawdown_model: "Max drawdown",
+    consistency_pct: "Consistency",
+    news_before_min: "News window",
+    news_after_min: "News window",
+    weekend_holding_allowed: "Weekend holding",
+    min_trading_days: "Trading days",
+    copy_trading_permitted: "Copy trading",
+  };
+  return cats[field] ?? field;
+}
 
-function DiffTable({
-  oldValues,
-  newValues,
-  editMode,
-  edited,
-  onEdit,
-}: {
-  oldValues: Record<string, unknown>;
-  newValues: Record<string, unknown>;
-  editMode: boolean;
-  edited: Record<string, unknown>;
-  onEdit: (field: string, val: unknown) => void;
-}) {
-  // Show only changed fields (exclude internal _reasoning key)
-  const fields = Object.keys(newValues).filter((f) => !f.startsWith("_"));
+function confidenceLevel(c: number | null): { label: string; Icon: React.ElementType; cls: string } {
+  if (c == null || c < 0.6)
+    return { label: "Low confidence", Icon: CircleHelp, cls: "border-border bg-surface text-text-secondary" };
+  if (c < 0.85)
+    return { label: "Medium confidence", Icon: CircleDashed, cls: "border-warning/30 bg-warning/10 text-warning" };
+  return { label: "High confidence", Icon: CircleCheckBig, cls: "border-primary/30 bg-primary/10 text-primary-light" };
+}
 
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function StakesTag({ critical }: { critical: boolean }) {
+  if (critical) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-lg border border-loss/40 bg-loss/[0.08] px-2.5 py-1 text-[11.5px] font-semibold text-loss">
+        <ShieldAlert size={13} /> Account-killing — approval required
+      </span>
+    );
+  }
   return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="border-b border-border">
-          <th className="py-2 pr-4 text-left font-medium text-text-muted w-36">Field</th>
-          <th className="py-2 pr-4 text-left font-medium text-text-muted">Current</th>
-          <th className="py-2 text-left font-medium text-text-muted">
-            {editMode ? "Edit proposal" : "Proposed"}
-          </th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border/50">
-        {fields.map((field) => {
-          const oldVal = oldValues[field];
-          const proposedVal = newValues[field];
-          const editedVal = edited[field] ?? proposedVal;
-          const permissive = isMorePermissive(field, oldVal, proposedVal);
-
-          return (
-            <tr key={field}>
-              <td className="py-2 pr-4 text-text-secondary font-medium">
-                {fieldLabel(field)}
-              </td>
-              <td className="py-2 pr-4 text-text-muted tabular-nums">
-                {formatFieldValue(field, oldVal)}
-              </td>
-              <td className="py-2">
-                {editMode ? (
-                  <EditCell field={field} value={editedVal} onChange={(v) => onEdit(field, v)} />
-                ) : (
-                  <span className={`tabular-nums font-medium ${
-                    permissive ? "text-warning" : "text-profit"
-                  }`}>
-                    {formatFieldValue(field, proposedVal)}
-                    {permissive && (
-                      <AlertTriangle size={10} className="inline ml-1 mb-0.5" />
-                    )}
-                  </span>
-                )}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-elevated px-2.5 py-1 text-[11.5px] font-medium text-text-secondary">
+      <Feather size={13} className="text-text-muted" /> Low-stakes
+    </span>
   );
 }
 
-function EditCell({
-  field,
-  value,
-  onChange,
-}: {
-  field: string;
-  value: unknown;
-  onChange: (val: unknown) => void;
-}) {
-  if (
-    field === "daily_loss_basis" ||
-    field === "max_drawdown_model"
-  ) {
-    const options =
-      field === "daily_loss_basis"
-        ? ["equity", "balance"]
-        : ["static", "eod_trailing", "intraday_trailing"];
+function EditCell({ field, value, onChange }: { field: string; value: unknown; onChange: (val: unknown) => void }) {
+  if (field === "daily_loss_basis" || field === "max_drawdown_model") {
+    const options = field === "daily_loss_basis" ? ["equity", "balance"] : ["static", "eod_trailing", "intraday_trailing"];
     return (
       <select
         value={String(value)}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-border bg-surface-elevated px-2 py-0.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+        className="num rounded-lg border border-primary/40 bg-primary/[0.06] px-2 py-1 text-[13px] font-bold text-primary-light focus:outline-none"
       >
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o} value={o} className="bg-surface">{o}</option>)}
       </select>
     );
   }
-
   if (field === "weekend_holding_allowed" || field === "copy_trading_permitted") {
     return (
       <select
         value={String(value)}
         onChange={(e) => onChange(e.target.value === "true")}
-        className="rounded border border-border bg-surface-elevated px-2 py-0.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+        className="num rounded-lg border border-primary/40 bg-primary/[0.06] px-2 py-1 text-[13px] font-bold text-primary-light focus:outline-none"
       >
-        <option value="true">Yes</option>
-        <option value="false">No</option>
+        <option value="true" className="bg-surface">Yes</option>
+        <option value="false" className="bg-surface">No</option>
       </select>
     );
   }
-
-  // Numeric field
   return (
     <input
       type="number"
       step="0.001"
       value={typeof value === "number" || typeof value === "string" ? Number(value) : 0}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="w-24 rounded border border-border bg-surface-elevated px-2 py-0.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+      className="num w-24 rounded-lg border border-primary/40 bg-primary/[0.06] px-2 py-1 text-[13px] font-bold text-primary-light focus:outline-none"
     />
   );
 }
 
-// ── Proposal Card ─────────────────────────────────────────────────────────────
+function DiffBlock({
+  field, oldVal, newVal, unclear, editMode, editedVal, onEdit,
+}: {
+  field: string;
+  oldVal: unknown;
+  newVal: unknown;
+  unclear: boolean;
+  editMode: boolean;
+  editedVal: unknown;
+  onEdit: (val: unknown) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-bg/40 p-3.5 sm:p-4">
+      <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-text-muted">
+        <GitCompareArrows size={13} /> Changed field
+      </div>
+      <div className="mt-2 text-[13px] font-semibold text-text-primary">{fieldLabel(field)}</div>
+      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+        {unclear ? (
+          <span className="inline-flex items-center gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/[0.06] px-3 py-2 text-[12.5px] font-medium text-warning">
+            <CircleHelp size={15} /> Low confidence — verify the source before approving
+          </span>
+        ) : (
+          <>
+            <span className="inline-flex items-baseline gap-1.5 rounded-lg border border-border bg-surface-elevated px-3 py-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-text-muted">old</span>
+              <span className="num text-[15px] font-bold text-text-secondary line-through decoration-text-muted/60">
+                {formatFieldValue(field, oldVal)}
+              </span>
+            </span>
+            <ArrowRight size={16} className="text-text-muted" />
+            {editMode ? (
+              <EditCell field={field} value={editedVal} onChange={onEdit} />
+            ) : (
+              <span className="inline-flex items-baseline gap-1.5 rounded-lg border border-warning/45 bg-warning/[0.1] px-3 py-1.5 ring-1 ring-warning/20">
+                <span className="text-[10px] uppercase tracking-wide text-warning/80">new</span>
+                <span className="num text-[15px] font-bold text-warning">{formatFieldValue(field, newVal)}</span>
+              </span>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({
+  icon: Icon, children, tone = "ghost", onClick, disabled, busy,
+}: {
+  icon: React.ElementType;
+  children: React.ReactNode;
+  tone?: "primary" | "ghost";
+  onClick?: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  const tones = {
+    primary: "bg-primary text-[#04201D] hover:bg-primary-light",
+    ghost: "border border-border bg-surface-elevated text-text-secondary hover:text-text-primary",
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tones[tone]}`}
+    >
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <Icon size={15} strokeWidth={2.2} />} {children}
+    </button>
+  );
+}
+
+// ── Proposal card ─────────────────────────────────────────────────────────────
 
 function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned: (id: string) => void }) {
-  const [expanded, setExpanded] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [edited, setEdited] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState<"approve" | "reject" | null>(null);
@@ -200,8 +224,13 @@ function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned
   const { _reasoning, ...newValues } = rawNew as Record<string, unknown>;
 
   const changedFields = Object.keys(newValues);
-  const stakes = classifyProposalStakes(changedFields);
-  const isCritical = stakes === "critical";
+  const critical = classifyProposalStakes(changedFields) === "critical";
+  const lowConfidence = (proposal.agent_confidence ?? 1) < 0.6;
+  const conf = confidenceLevel(proposal.agent_confidence);
+  const ConfIcon = conf.Icon;
+
+  const firmLabel = proposal.prop_firms?.name ?? proposal.firm_id.slice(0, 8);
+  const challengeLabel = proposal.prop_rulesets?.challenge_name ?? "—";
 
   const handleEdit = useCallback((field: string, val: unknown) => {
     setEdited((prev) => ({ ...prev, [field]: val }));
@@ -211,10 +240,8 @@ function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned
     setSaving("approve");
     setError(null);
     try {
-      const editedValues = editMode && Object.keys(edited).length > 0
-        ? { ...newValues, ...edited }
-        : undefined;
-
+      const editedValues =
+        editMode && Object.keys(edited).length > 0 ? { ...newValues, ...edited } : undefined;
       const res = await fetch("/api/admin/prop/proposals/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -225,7 +252,7 @@ function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned
         setError((j as { error?: string }).error ?? "Approve failed");
       } else {
         setDone("approved");
-        setTimeout(() => onActioned(proposal.id), 800);
+        setTimeout(() => onActioned(proposal.id), 1200);
       }
     } catch {
       setError("Network error");
@@ -248,7 +275,7 @@ function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned
         setError((j as { error?: string }).error ?? "Reject failed");
       } else {
         setDone("rejected");
-        setTimeout(() => onActioned(proposal.id), 800);
+        setTimeout(() => onActioned(proposal.id), 1200);
       }
     } catch {
       setError("Network error");
@@ -257,147 +284,138 @@ function ProposalCard({ proposal, onActioned }: { proposal: Proposal; onActioned
     }
   }, [proposal.id, onActioned]);
 
-  if (done) {
-    return (
-      <div className={`card p-4 flex items-center gap-3 text-sm ${
-        done === "approved" ? "border-profit/20 text-profit" : "border-border text-text-muted"
-      }`}>
-        {done === "approved"
-          ? <CheckCircle2 size={16} />
-          : <XCircle size={16} />}
-        <span>{done === "approved" ? "Published" : "Rejected"}</span>
-      </div>
-    );
-  }
-
-  const firmLabel = proposal.prop_firms?.name ?? proposal.firm_id.slice(0, 8);
-  const challengeLabel = proposal.prop_rulesets?.challenge_name ?? "—";
-  const currentVersion = proposal.prop_rulesets?.version ?? 1;
-
   return (
-    <div className={`card overflow-hidden border ${
-      isCritical ? "border-loss/30" : "border-primary/20"
-    }`}>
+    <div className={`overflow-hidden rounded-2xl border bg-surface transition-colors ${done ? "border-border opacity-90" : critical ? "border-loss/25" : "border-border"}`}>
       {/* Header */}
-      <div
-        className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer hover:bg-surface-elevated/30"
-        onClick={() => setExpanded((e) => !e)}
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-            isCritical
-              ? "bg-loss/10 text-loss border border-loss/20"
-              : "bg-primary/10 text-primary border border-primary/20"
-          }`}>
-            {isCritical ? "Critical" : "Low-stakes"}
+      <div className="flex flex-col gap-3 border-b border-border/60 p-4 sm:flex-row sm:items-start sm:p-5">
+        <div className="flex min-w-0 flex-1 items-start gap-3.5">
+          <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-[16px] font-bold ${lowConfidence ? "border-warning/30 bg-warning/10 text-warning" : "border-primary/30 bg-primary/10 text-primary-light"}`}>
+            {firmLabel.charAt(0).toUpperCase()}
           </span>
-          <span className="text-sm font-medium text-text-primary truncate">
-            {firmLabel}
-          </span>
-          <span className="text-xs text-text-muted shrink-0">
-            {challengeLabel} v{currentVersion}
-          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h3 className="text-[15.5px] font-bold tracking-tight text-text-primary">{firmLabel}</h3>
+              <span className="text-text-muted">—</span>
+              <span className="num text-[12.5px] text-text-secondary">{challengeLabel}</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-secondary">
+                <Tag size={11} /> {categoryLabel(changedFields[0] ?? "")}
+                {changedFields.length > 1 && ` +${changedFields.length - 1}`}
+              </span>
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${conf.cls}`}>
+                <ConfIcon size={11} /> {conf.label}
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {proposal.agent_confidence != null && (
-            <span className={`text-xs tabular-nums ${
-              proposal.agent_confidence >= 0.85 ? "text-profit" :
-              proposal.agent_confidence >= 0.6  ? "text-warning" :
-                                                  "text-loss"
-            }`}>
-              {(proposal.agent_confidence * 100).toFixed(0)}% confidence
-            </span>
-          )}
-          <span className="text-xs text-text-muted">{timeAgo(proposal.created_at)}</span>
-          {expanded ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
+        <div className="flex shrink-0 items-center sm:pt-1">
+          <StakesTag critical={critical} />
         </div>
       </div>
 
-      {expanded && (
-        <div className="border-t border-border px-4 py-4 space-y-4">
-          {/* Stakes explanation */}
-          {isCritical && (
-            <div className="flex items-start gap-2 rounded-lg border border-loss/20 bg-loss/5 px-3 py-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-loss" />
-              <p className="text-xs text-loss">
-                {stakesLabel(stakes)} — changed fields can affect funded account standing.
-                Human approval required before publishing.
-              </p>
-            </div>
-          )}
+      {/* Status banners */}
+      {done === "approved" && (
+        <div className="flex items-center gap-2 border-b border-primary/20 bg-primary/[0.05] px-4 py-2.5 text-[12.5px] font-medium text-primary-light sm:px-5">
+          <CircleCheck size={15} /> Approved &amp; published · added to version history
+        </div>
+      )}
+      {done === "rejected" && (
+        <div className="flex items-center gap-2 border-b border-border bg-bg/40 px-4 py-2.5 text-[12.5px] font-medium text-text-secondary sm:px-5">
+          <CircleSlash size={15} className="text-text-muted" /> Rejected · change discarded, not published
+        </div>
+      )}
+      {!done && lowConfidence && (
+        <div className="flex items-center gap-2 border-b border-warning/20 bg-warning/[0.05] px-4 py-2.5 text-[12.5px] font-medium text-warning sm:px-5">
+          <TriangleAlert size={15} /> Manual review needed · agent could not parse a confident value
+        </div>
+      )}
 
-          {/* Diff table */}
-          <DiffTable
-            oldValues={oldValues}
-            newValues={newValues}
-            editMode={editMode}
-            edited={edited}
-            onEdit={handleEdit}
-          />
+      {/* Body */}
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-col gap-3">
+          {changedFields.map((field) => (
+            <DiffBlock
+              key={field}
+              field={field}
+              oldVal={oldValues[field]}
+              newVal={newValues[field]}
+              unclear={false}
+              editMode={editMode}
+              editedVal={edited[field] ?? newValues[field]}
+              onEdit={(v) => handleEdit(field, v)}
+            />
+          ))}
+        </div>
 
-          {/* Claude reasoning */}
-          {typeof _reasoning === "string" && _reasoning && (
-            <div className="flex items-start gap-2 rounded-lg bg-surface-elevated px-3 py-2">
-              <Info size={12} className="mt-0.5 shrink-0 text-text-muted" />
-              <p className="text-xs text-text-muted italic">{_reasoning}</p>
-            </div>
-          )}
+        {typeof _reasoning === "string" && _reasoning && (
+          <p className="mt-3 text-[12.5px] leading-relaxed text-text-secondary">{_reasoning}</p>
+        )}
 
-          {/* Source link */}
+        {editMode && Object.keys(edited).length > 0 && (
+          <div className="num mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/[0.06] px-2.5 py-1 text-[11px] text-primary-light">
+            <PencilLine size={11} /> Value edited by approver — logged in the version history
+          </div>
+        )}
+
+        {/* Meta row */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <CalendarClock size={12} /> Detected <span className="num text-text-secondary">{timeAgo(proposal.created_at)}</span>
+          </span>
           {proposal.source_url && (
             <a
               href={proposal.source_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1.5 text-primary-light transition-colors hover:text-primary"
             >
-              <ExternalLink size={12} />
-              Verify source
+              <ExternalLink size={12} /> View source
             </a>
           )}
-
-          {error && <p className="text-xs text-loss">{error}</p>}
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 pt-1 border-t border-border">
-            <button
-              onClick={() => { setEditMode((e) => !e); setEdited({}); }}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                editMode
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-text-secondary hover:border-primary/50 hover:text-text-primary"
-              }`}
-            >
-              <Edit3 size={12} />
-              {editMode ? "Editing" : "Edit values"}
-            </button>
-
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                onClick={reject}
-                disabled={saving !== null}
-                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-loss/50 hover:text-loss disabled:opacity-50 transition-colors"
-              >
-                {saving === "reject" ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
-                Reject
-              </button>
-              <button
-                onClick={approve}
-                disabled={saving !== null}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {saving === "approve" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                {editMode ? "Approve with edits" : "Approve & Publish"}
-              </button>
-            </div>
-          </div>
+          {proposal.agent_confidence != null && (
+            <span className="inline-flex items-center gap-1.5">
+              <Cpu size={12} /> <span className="num">{Math.round(proposal.agent_confidence * 100)}% confidence</span>
+            </span>
+          )}
         </div>
-      )}
+
+        {error && <p className="mt-3 text-xs text-loss">{error}</p>}
+
+        {/* Actions */}
+        {!done && (
+          <div className={`mt-5 flex flex-wrap items-center gap-2.5 border-t pt-4 ${lowConfidence ? "border-warning/20" : "border-border/60"}`}>
+            <ActionBtn icon={Check} tone="primary" onClick={approve} disabled={saving !== null} busy={saving === "approve"}>
+              {editMode && Object.keys(edited).length > 0 ? "Approve with edits" : "Approve"}
+            </ActionBtn>
+            <ActionBtn icon={X} onClick={reject} disabled={saving !== null} busy={saving === "reject"}>
+              Reject
+            </ActionBtn>
+            <ActionBtn
+              icon={PencilLine}
+              onClick={() => { setEditMode((e) => !e); if (editMode) setEdited({}); }}
+              disabled={saving !== null}
+            >
+              {editMode ? "Cancel edit" : "Edit value"}
+            </ActionBtn>
+            {lowConfidence && proposal.source_url && (
+              <a
+                href={proposal.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-surface-elevated px-3.5 text-[13px] font-semibold text-text-secondary transition-colors hover:text-text-primary"
+              >
+                <ExternalLink size={15} /> Open source
+              </a>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export default function ApprovalQueue({ proposals }: Props) {
   const [visible, setVisible] = useState(proposals.map((p) => p.id));
@@ -408,34 +426,30 @@ export default function ApprovalQueue({ proposals }: Props) {
 
   const pendingProposals = proposals.filter((p) => visible.includes(p.id));
 
-  if (pendingProposals.length === 0) {
+  // Highest stakes first
+  const sorted = [...pendingProposals].sort((a, b) => {
+    const stakes = (p: Proposal) =>
+      classifyProposalStakes(Object.keys((p.new_values ?? {}) as Record<string, unknown>).filter((f) => !f.startsWith("_"))) === "critical" ? 0 : 1;
+    return stakes(a) - stakes(b);
+  });
+
+  if (sorted.length === 0) {
     return (
-      <div className="card p-10 text-center space-y-2">
-        <CheckCircle2 size={28} className="mx-auto text-profit" />
-        <p className="text-sm font-medium text-text-primary">Queue is empty</p>
-        <p className="text-xs text-text-muted">
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface/50 px-6 py-12 text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-primary-light">
+          <CircleCheck size={24} />
+        </span>
+        <p className="mt-4 text-sm font-medium text-text-primary">Queue is empty</p>
+        <p className="mt-1 text-xs text-text-muted">
           No pending rule proposals. The Rule Monitor will surface new ones when changes are detected.
         </p>
       </div>
     );
   }
 
-  const criticalCount = pendingProposals.filter((p) => {
-    const fields = Object.keys((p.new_values ?? {}) as Record<string, unknown>)
-      .filter((f) => !f.startsWith("_"));
-    return classifyProposalStakes(fields) === "critical";
-  }).length;
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 text-xs text-text-muted">
-        <span>{pendingProposals.length} pending</span>
-        {criticalCount > 0 && (
-          <span className="text-loss font-medium">{criticalCount} critical</span>
-        )}
-      </div>
-
-      {pendingProposals.map((p) => (
+    <div className="flex flex-col gap-3.5">
+      {sorted.map((p) => (
         <ProposalCard key={p.id} proposal={p} onActioned={handleActioned} />
       ))}
     </div>

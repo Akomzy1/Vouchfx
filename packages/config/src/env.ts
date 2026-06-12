@@ -19,6 +19,10 @@ const envSchema = z.object({
   // Anthropic — signal parser
   ANTHROPIC_API_KEY: z.string().optional(),
 
+  // JBlanked News API — economic calendar primary feed (VCH-RSK-06b).
+  // FREE TIER: 1 request/day — the fetcher enforces this via calendar_fetch_log.
+  JBLANKED_API_KEY: z.string().optional(),
+
   // MetaApi — broker execution
   METAAPI_TOKEN: z.string().optional(),
   // Phase-0 spike: the MetaApi account id for the one hardcoded demo account

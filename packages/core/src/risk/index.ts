@@ -48,3 +48,31 @@ export {
   AUTO_PUBLISH_CONFIDENCE,
 } from "./prop-publish";
 export type { ProposalStakes, AccountKillingField, LowStakesField } from "./prop-publish";
+export {
+  zonedTimeToUtc,
+  parseJBlankedTime,
+  parseFFTime,
+  mapImpact,
+  isNewsBlocked,
+  isCacheStale,
+  isInFailSafeWindow,
+  CALENDAR_STALE_HOURS,
+  FAILSAFE_WINDOWS_UTC,
+  FAILSAFE_BLOCKS_NON_PROP,
+  FEED_SOURCE_TIMEZONE,
+} from "./news-filter";
+export type { CalendarImpact, CalendarEvent, NewsBlockResult } from "./news-filter";
+export {
+  syncCalendar,
+  JBLANKED_CALENDAR_URL,
+  FF_CALENDAR_URL,
+  FF_MIN_INTERVAL_MS,
+} from "./calendar-sync";
+export type {
+  CalendarStore,
+  CalendarEventUpsert,
+  CalendarSource,
+  FetchStatus,
+  SyncResult,
+  FetchLike,
+} from "./calendar-sync";

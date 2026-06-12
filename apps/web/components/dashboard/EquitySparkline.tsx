@@ -2,8 +2,8 @@
 
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   Tooltip,
   YAxis,
 } from "recharts";
@@ -18,23 +18,14 @@ interface Props {
   currency: string;
 }
 
-function formatCcy(n: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CustomTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
   const point = payload[0].payload as DataPoint;
   return (
-    <div className="rounded-sm border border-border bg-surface-elevated px-2.5 py-1.5 shadow-lg">
-      <p className="num text-xs font-semibold text-text-primary tabular-nums">
-        {payload[0].value.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+    <div className="rounded-md border border-border bg-surface-elevated px-1.5 py-0.5 shadow-lg">
+      <p className="num text-[10px] font-semibold text-text-primary tabular-nums">
+        ${payload[0].value.toLocaleString("en-US", { minimumFractionDigits: 2 })}
       </p>
       <p className="text-2xs text-text-muted">
         {new Date(point.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -43,7 +34,9 @@ function CustomTooltip({ active, payload }: any) {
   );
 }
 
-export default function EquitySparkline({ data, currency }: Props) {
+const TEAL = "#2DD4BF";
+
+export default function EquitySparkline({ data }: Props) {
   if (data.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -56,25 +49,29 @@ export default function EquitySparkline({ data, currency }: Props) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const domain: [number, number] = [min * 0.999, max * 1.001];
-  const isFlat = min === max;
-  const trend = data.length > 1 ? data[data.length - 1]!.balance - data[0]!.balance : 0;
-  const trendColor = isFlat ? "#8B98A5" : trend >= 0 ? "#22C55E" : "#EF4444";
 
   return (
     <div className="w-full h-full flex flex-col">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+          <defs>
+            <linearGradient id="equity-spark" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={TEAL} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={TEAL} stopOpacity={0} />
+            </linearGradient>
+          </defs>
           <YAxis domain={domain} hide />
           <Tooltip content={<CustomTooltip />} />
-          <Line
+          <Area
             type="monotone"
             dataKey="balance"
-            stroke={trendColor}
-            strokeWidth={1.5}
+            stroke={TEAL}
+            strokeWidth={1.6}
+            fill="url(#equity-spark)"
             dot={false}
-            activeDot={{ r: 3, fill: trendColor, strokeWidth: 0 }}
+            activeDot={{ r: 3, fill: TEAL, stroke: "#0B0F14", strokeWidth: 2 }}
           />
-        </LineChart>
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

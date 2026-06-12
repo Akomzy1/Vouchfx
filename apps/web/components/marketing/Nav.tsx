@@ -3,13 +3,23 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Send, Menu, X } from "lucide-react";
+import Mark from "./Mark";
+
+const TELEGRAM_URL = "https://t.me/getvouchfx";
+
+const LINKS: [string, string][] = [
+  ["Features", "#features"],
+  ["How it works", "#how"],
+  ["Pricing", "#pricing"],
+  ["Affiliates", "#affiliates"],
+];
 
 export default function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const fn = () => setScrolled(window.scrollY > 16);
+    const fn = () => setScrolled(window.scrollY > 8);
     window.addEventListener("scroll", fn, { passive: true });
     return () => window.removeEventListener("scroll", fn);
   }, []);
@@ -18,82 +28,99 @@ export default function Nav() {
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-all duration-200 ${
-        scrolled ? "bg-bg/95 backdrop-blur-sm border-b border-border" : "bg-transparent"
+      className={`sticky top-0 z-50 transition-colors ${
+        scrolled ? "border-b border-border bg-bg/85 backdrop-blur-md" : "border-b border-transparent"
       }`}
     >
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between gap-6">
-        {/* Wordmark */}
-        <Link href="/" className="flex items-center gap-2 shrink-0">
-          <span className="h-2.5 w-2.5 rounded-full bg-primary" />
-          <span className="font-bold tracking-tight text-text-primary">VouchFX</span>
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 sm:px-8">
+        <Link href="/" className="flex items-center gap-2.5">
+          <Mark size={26} />
+          <span className="text-[17px] font-bold tracking-tight text-text-primary">
+            Vouch<span className="text-primary">FX</span>
+          </span>
         </Link>
 
-        {/* Desktop nav links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm text-text-secondary flex-1">
-          <a href="#features" className="hover:text-text-primary transition-colors">Features</a>
-          <a href="#how" className="hover:text-text-primary transition-colors">How it works</a>
-          <a href="#pricing" className="hover:text-text-primary transition-colors">Pricing</a>
-          <a href="#affiliates" className="hover:text-text-primary transition-colors">Affiliates</a>
+        <nav className="hidden items-center gap-1 md:flex">
+          {LINKS.map(([label, href]) => (
+            <a
+              key={label}
+              href={href}
+              className="rounded-lg px-3.5 py-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
+            >
+              {label}
+            </a>
+          ))}
           <a
-            href="https://t.me/getvouchfx"
+            href={TELEGRAM_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 hover:text-text-primary transition-colors"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
           >
-            <Send size={13} />
-            Telegram
+            <Send size={15} /> Telegram
           </a>
+          <Link
+            href="/login"
+            className="rounded-lg px-3.5 py-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
+          >
+            Login
+          </Link>
         </nav>
 
-        {/* Desktop auth CTAs */}
-        <div className="hidden md:flex items-center gap-3 shrink-0">
+        <div className="hidden items-center gap-3 md:flex">
           <Link
-            href="/auth/login"
-            className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+            href="/signup"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-[#04201D] shadow-[0_8px_24px_-8px_rgba(20,184,166,0.6)] transition-all hover:bg-primary-light hover:shadow-[0_10px_30px_-8px_rgba(20,184,166,0.7)] active:translate-y-px"
           >
-            Log in
-          </Link>
-          <Link href="/auth/signup" className="btn-primary py-1.5 px-4 text-sm">
             Start free trial
           </Link>
         </div>
 
-        {/* Mobile hamburger */}
         <button
-          className="md:hidden p-1 text-text-secondary hover:text-text-primary transition-colors"
           onClick={() => setOpen((v) => !v)}
-          aria-label="Toggle navigation menu"
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-text-primary md:hidden"
+          aria-label="Menu"
         >
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
       </div>
 
-      {/* Mobile dropdown */}
       {open && (
-        <div className="md:hidden bg-bg/98 backdrop-blur-sm border-b border-border px-4 pb-5 space-y-1">
-          <a href="#features" className="block py-2.5 text-sm text-text-secondary hover:text-text-primary" onClick={close}>Features</a>
-          <a href="#how" className="block py-2.5 text-sm text-text-secondary hover:text-text-primary" onClick={close}>How it works</a>
-          <a href="#pricing" className="block py-2.5 text-sm text-text-secondary hover:text-text-primary" onClick={close}>Pricing</a>
-          <a href="#affiliates" className="block py-2.5 text-sm text-text-secondary hover:text-text-primary" onClick={close}>Affiliates</a>
-          <a
-            href="https://t.me/getvouchfx"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 py-2.5 text-sm text-text-secondary hover:text-text-primary"
+        <div className="border-t border-border bg-bg/95 px-5 pb-5 pt-2 backdrop-blur md:hidden">
+          <nav className="flex flex-col">
+            {LINKS.map(([label, href]) => (
+              <a
+                key={label}
+                href={href}
+                onClick={close}
+                className="border-b border-border/60 py-3 text-sm font-medium text-text-secondary"
+              >
+                {label}
+              </a>
+            ))}
+            <a
+              href={TELEGRAM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={close}
+              className="flex items-center gap-1.5 border-b border-border/60 py-3 text-sm font-medium text-text-secondary"
+            >
+              <Send size={15} /> Telegram
+            </a>
+            <Link
+              href="/login"
+              onClick={close}
+              className="border-b border-border/60 py-3 text-sm font-medium text-text-secondary"
+            >
+              Login
+            </Link>
+          </nav>
+          <Link
+            href="/signup"
             onClick={close}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-[15px] font-semibold text-[#04201D] shadow-[0_8px_24px_-8px_rgba(20,184,166,0.6)] transition-all hover:bg-primary-light active:translate-y-px"
           >
-            <Send size={13} />
-            Telegram
-          </a>
-          <div className="pt-3 flex flex-col gap-2">
-            <Link href="/auth/login" className="btn-ghost text-sm w-full justify-center" onClick={close}>
-              Log in
-            </Link>
-            <Link href="/auth/signup" className="btn-primary text-sm w-full justify-center" onClick={close}>
-              Start free trial
-            </Link>
-          </div>
+            Start free trial
+          </Link>
         </div>
       )}
     </header>
