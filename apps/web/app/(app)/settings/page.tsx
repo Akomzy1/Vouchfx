@@ -7,6 +7,7 @@ import BrokerConnections, {
   type BrokerConnectionRow,
 } from "@/components/broker/BrokerConnections";
 import NotificationPreferences from "@/components/notifications/NotificationPreferences";
+import ProfileName from "@/components/settings/ProfileName";
 import { NOTIFY_EVENTS } from "@vouchfx/core";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -20,7 +21,8 @@ export default async function SettingsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
 
-  const [{ data: brokerConnections }, { data: notifPrefs }] = await Promise.all([
+  const [{ data: profileRow }, { data: brokerConnections }, { data: notifPrefs }] = await Promise.all([
+    db.from("users").select("full_name").eq("id", user.id).single(),
     db
       .from("broker_connections")
       .select("id, label, platform, is_active, status, account_mode, server_hint, last_status_at, created_at")
@@ -56,9 +58,14 @@ export default async function SettingsPage() {
           <p className="text-xs font-medium uppercase tracking-wide text-text-secondary mb-3">
             Account
           </p>
-          <div className="space-y-1">
-            <p className="text-xs text-text-muted">Email</p>
-            <p className="text-sm text-text-primary">{user.email}</p>
+          <div className="space-y-3">
+            <ProfileName
+              initialName={(profileRow as { full_name: string | null } | null)?.full_name ?? null}
+            />
+            <div className="space-y-1">
+              <p className="text-xs text-text-muted">Email</p>
+              <p className="text-sm text-text-primary">{user.email}</p>
+            </div>
           </div>
         </div>
         <div className="px-4 py-3 flex items-center justify-between">

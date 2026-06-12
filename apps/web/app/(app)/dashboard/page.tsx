@@ -130,10 +130,11 @@ export default async function DashboardPage() {
   // Redirect new users to onboarding wizard
   const { data: userMeta } = await db
     .from("users")
-    .select("onboarding_completed_at")
+    .select("onboarding_completed_at, full_name")
     .eq("id", user.id)
     .single();
-  if (!(userMeta as { onboarding_completed_at: string | null } | null)?.onboarding_completed_at) {
+  const userRow = userMeta as { onboarding_completed_at: string | null; full_name: string | null } | null;
+  if (!userRow?.onboarding_completed_at) {
     redirect("/onboarding");
   }
 
@@ -214,7 +215,14 @@ export default async function DashboardPage() {
   }
 
   const openCount = (openTrades ?? []).length;
-  const name = (user.email ?? "").split("@")[0] ?? "";
+  // Greet by first name: users.full_name → auth metadata (Google) → email prefix
+  const fullName = (
+    userRow?.full_name ??
+    (user.user_metadata?.full_name as string | undefined) ??
+    (user.user_metadata?.name as string | undefined) ??
+    ""
+  ).trim();
+  const name = fullName ? fullName.split(/\s+/)[0]! : ((user.email ?? "").split("@")[0] ?? "");
   const displayName = name.charAt(0).toUpperCase() + name.slice(1);
 
   const pnlTone = floatingPnl == null ? "ink" : floatingPnl >= 0 ? "profit" : "loss";

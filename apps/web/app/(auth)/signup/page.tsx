@@ -6,6 +6,7 @@ import { signInWithGoogle } from "@/lib/auth/actions";
 import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export default function SignupPage() {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
+        data: { full_name: fullName.trim() },
       },
     });
     setLoading(false);
@@ -50,6 +52,23 @@ export default function SignupPage() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-text-secondary" htmlFor="fullName">
+              Full name
+            </label>
+            <input
+              id="fullName"
+              type="text"
+              autoComplete="name"
+              required
+              maxLength={80}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Your name"
+            />
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-text-secondary" htmlFor="email">
               Email
