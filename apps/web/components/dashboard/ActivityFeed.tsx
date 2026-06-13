@@ -13,6 +13,7 @@ import {
 interface AuditEvent {
   id: string;
   event_type: string;
+  parsed_signal_id: string | null;
   payload: Record<string, unknown> | null;
   created_at: string;
 }
@@ -118,10 +119,13 @@ export default function ActivityFeed({ events }: Props) {
         {events.map((event) => {
           const { Icon, tone, title, detail } = describe(event);
           const channel = (event.payload?.channel_title as string | undefined) ?? null;
+          // Link to the signal's audit trail when this event belongs to one;
+          // events with no signal (e.g. ops alerts) fall back to the list.
+          const href = event.parsed_signal_id ? `/signals/${event.parsed_signal_id}` : "/signals";
           return (
             <Link
               key={event.id}
-              href="/signals"
+              href={href}
               className="group relative flex items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-surface-elevated/50"
             >
               <span

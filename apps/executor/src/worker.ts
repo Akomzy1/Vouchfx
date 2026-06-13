@@ -1224,38 +1224,30 @@ async function processJob(
   const { signal: parsed, modelUsed } = await parseSignalWithEscalation(anthropic, text, priorSignal, imageBase64);
   console.log(`${tag} parsed: is_signal=${parsed.is_signal} confidence=${parsed.confidence.toFixed(2)} symbol=${parsed.symbol ?? "-"} follow_up=${parsed.follow_up_type ?? "none"} model=${modelUsed}`);
 
-  // ── 4. Audit: parsed ──────────────────────────────────────────────────────
-  await writeAuditEvent(db, {
-    userId,
-    eventType: "parsed",
-    payload: {
-      is_signal: parsed.is_signal,
-      symbol: parsed.symbol,
-      side: parsed.side,
-      confidence: parsed.confidence,
-      reasoning: parsed.reasoning,
-      follow_up_type: parsed.follow_up_type,
-      model: modelUsed,
-      escalated: modelUsed !== MODELS.default,
-      edit_version: editVersion,
-      vision: Boolean(imageBase64),
-    },
-  });
+  const parsedPayload = {
+    is_signal: parsed.is_signal,
+    symbol: parsed.symbol,
+    side: parsed.side,
+    confidence: parsed.confidence,
+    reasoning: parsed.reasoning,
+    follow_up_type: parsed.follow_up_type,
+    model: modelUsed,
+    escalated: modelUsed !== MODELS.default,
+    edit_version: editVersion,
+    vision: Boolean(imageBase64),
+  };
 
-  // ── 5. Gate: must be a signal with sufficient confidence ──────────────────
+  // ── 4. Non-signals (chit-chat) never persist a row — nothing to review ─────
   if (!parsed.is_signal) {
     console.log(`${tag} skipped: not a signal`);
+    await writeAuditEvent(db, { userId, eventType: "parsed", payload: parsedPayload });
     await writeAuditEvent(db, { userId, eventType: "skipped", payload: { reason: "not_a_signal" } });
     return;
   }
-  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
-    const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
-    console.log(`${tag} skipped: ${reason}`);
-    await writeAuditEvent(db, { userId, eventType: "skipped", payload: { reason, confidence: parsed.confidence } });
-    return;
-  }
 
-  // ── 6. Upsert parsed_signal ───────────────────────────────────────────────
+  // ── 5. Persist the parsed_signal NOW — BEFORE the confidence gate — so every
+  //    real parsed signal has a reviewable audit trail (VCH-PRS-04), and the
+  //    "parsed"/"skipped" activity items can deep-link to it.
   const psInsert: ParsedSignalInsert = {
     source_id: sourceId,
     telegram_message_id: messageId,
@@ -1297,6 +1289,17 @@ async function processJob(
     if (!existing) throw new Error(`[worker] could not resolve parsed_signal id`);
     parsedSignalId = (existing as { id: string }).id;
     console.log(`${tag} parsed_signal already persisted (id=${shortId(parsedSignalId)})`);
+  }
+
+  // ── 6. Audit: parsed (now carries the signal id for deep-linking) ─────────
+  await writeAuditEvent(db, { userId, eventType: "parsed", parsedSignalId, payload: parsedPayload });
+
+  // Confidence gate — skipped, but the row exists so the user can still review it.
+  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+    const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
+    console.log(`${tag} skipped: ${reason}`);
+    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, confidence: parsed.confidence } });
+    return;
   }
 
   // ── 7. Broker connection + per-channel settings ──────────────────────────

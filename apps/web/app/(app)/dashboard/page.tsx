@@ -162,7 +162,7 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(20),
     db.from("audit_events")
-      .select("id, event_type, payload, created_at")
+      .select("id, event_type, parsed_signal_id, payload, created_at")
       .in("event_type", ["executed", "skipped", "cancelled", "closed", "modified", "error"])
       .order("created_at", { ascending: false })
       .limit(8),
