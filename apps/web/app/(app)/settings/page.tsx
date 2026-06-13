@@ -9,6 +9,7 @@ import BrokerConnections, {
 import NotificationPreferences from "@/components/notifications/NotificationPreferences";
 import PushManager from "@/components/notifications/PushManager";
 import ProfileName from "@/components/settings/ProfileName";
+import DeleteAccount from "@/components/settings/DeleteAccount";
 import { NOTIFY_EVENTS } from "@vouchfx/core";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -147,6 +148,7 @@ export default async function SettingsPage() {
             </button>
           </form>
         </div>
+        <DeleteAccount />
       </div>
 
       <p className="text-xs text-text-muted">
