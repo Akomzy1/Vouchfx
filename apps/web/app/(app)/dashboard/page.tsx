@@ -152,7 +152,7 @@ export default async function DashboardPage() {
     { data: riskRow },
   ] = await Promise.all([
     db.from("broker_connections")
-      .select("id, label, is_active, status, platform, last_balance_usd, last_equity_usd, last_synced_at")
+      .select("id, label, is_active, status, platform, last_balance_usd, last_equity_usd, last_synced_at, today_realized_pnl_usd, today_pnl_date")
       .order("is_primary", { ascending: false })
       .order("created_at", { ascending: true }),
     db.from("signal_sources").select("id, title, is_enabled"),
@@ -189,12 +189,20 @@ export default async function DashboardPage() {
         last_balance_usd: number | null;
         last_equity_usd: number | null;
         last_synced_at: string | null;
+        today_realized_pnl_usd: number | null;
+        today_pnl_date: string | null;
       }
     | undefined;
 
   const balance = primaryBroker?.last_balance_usd ?? null;
   const equity = primaryBroker?.last_equity_usd ?? null;
   const floatingPnl = balance != null && equity != null ? equity - balance : null;
+
+  // Today's realized P&L — only trust the cached figure if it's actually for
+  // today (UTC); otherwise it's yesterday's stale number, so show 0 for today.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const todayRealizedPnl =
+    primaryBroker?.today_pnl_date === todayUtc ? Number(primaryBroker.today_realized_pnl_usd ?? 0) : 0;
   const hasBroker = (brokers ?? []).length > 0;
   const hasTelegram = (sources ?? []).length > 0;
   const brokerOk = !!primaryBroker && (primaryBroker.status === "connected" || primaryBroker.is_active);
@@ -226,6 +234,7 @@ export default async function DashboardPage() {
   const displayName = name.charAt(0).toUpperCase() + name.slice(1);
 
   const pnlTone = floatingPnl == null ? "ink" : floatingPnl >= 0 ? "profit" : "loss";
+  const todayTone = todayRealizedPnl > 0 ? "profit" : todayRealizedPnl < 0 ? "loss" : "ink";
 
   return (
     <div>
@@ -263,7 +272,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <StatCard
           label="Account balance"
           icon={Wallet}
@@ -284,6 +293,18 @@ export default async function DashboardPage() {
         <StatCard
           label="Today's P&L"
           icon={ArrowUpRight}
+          value={fmtSigned(todayRealizedPnl)}
+          tone={todayTone as "ink" | "profit" | "loss"}
+          sub={
+            <span className="flex items-center gap-1 text-text-muted">
+              <Lock size={11} /> Realized today
+            </span>
+          }
+        />
+
+        <StatCard
+          label="Floating P&L"
+          icon={Activity}
           value={floatingPnl != null ? fmtSigned(floatingPnl) : "—"}
           tone={pnlTone as "ink" | "profit" | "loss"}
           sub={

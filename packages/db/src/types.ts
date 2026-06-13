@@ -73,6 +73,8 @@ export interface BrokerConnectionRow {
   last_balance_usd: number | null;
   last_equity_usd: number | null;
   last_synced_at: string | null;
+  today_realized_pnl_usd: number | null;
+  today_pnl_date: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -46,6 +46,18 @@ export async function syncBrokerBalances(
     };
     try {
       const { balance, equity, accountMode } = await executor.getAccountInfo(conn);
+
+      // Today's realized P&L = profit from deals closed since 00:00 UTC.
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+      let todayPnl: number | null = null;
+      try {
+        todayPnl = await executor.getTodayRealizedPnl(conn, todayStart);
+      } catch {
+        // History API unavailable on some accounts — leave P&L untouched.
+      }
+      const todayDate = todayStart.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (db as any)
         .from("broker_connections")
@@ -54,6 +66,7 @@ export async function syncBrokerBalances(
           last_equity_usd: equity,
           last_synced_at: new Date().toISOString(),
           ...(accountMode ? { account_mode: accountMode } : {}),
+          ...(todayPnl != null ? { today_realized_pnl_usd: todayPnl, today_pnl_date: todayDate } : {}),
         })
         .eq("id", row.id);
       synced += 1;
