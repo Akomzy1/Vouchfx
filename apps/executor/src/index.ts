@@ -26,6 +26,7 @@ import { createWorker } from "./worker";
 import { startRuleMonitorSchedule } from "./rule-monitor";
 import { startCalendarSchedule } from "./calendar";
 import { startCommissionSweep } from "./commission";
+import { startBalanceSync } from "./balance-sync";
 
 const env = parseEnv();
 const log = createLogger("executor");
@@ -111,6 +112,9 @@ const stopCalendar = startCalendarSchedule({
 
 // Mature referral/affiliate commissions past their 14-day refund window.
 const stopCommissionSweep = startCommissionSweep(db, log);
+
+// Keep the dashboard's cached broker balance/equity fresh between signals.
+const stopBalanceSync = startBalanceSync(db, metaApiExecutor, log);
 
 worker.on("completed", (job) => {
   log.info("job completed", { jobId: job.id });
@@ -226,6 +230,7 @@ async function shutdown(): Promise<void> {
   stopRuleMonitor();
   stopCalendar();
   stopCommissionSweep();
+  stopBalanceSync();
   clearInterval(heartbeatTimer);
   clearInterval(killPollTimer);
   await worker.close();
