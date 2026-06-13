@@ -213,9 +213,20 @@ Stitch the 5-step onboarding wizard (VCH-ONB-01): Connect Telegram (+ optional r
 Demo-first mode was removed by product decision (PRD R6). VouchFX treats demo and live MT5 accounts identically; users test by connecting their broker's demo account. If demo-first code exists from an earlier build, remove it: drop demo_until/demo-first channel states, demo-account routing, and "Demo-first" status pills; add a short note to the broker-connect UI ("Want to test first? Connect your broker's free demo account — VouchFX works identically on demo and live"). Show account type (demo/live) as a badge on the broker connection, derived from MetaApi account info, so users always know which they're trading on.
 ```
 
-## Prompt P1.27 — Admin/ops + monitoring
+## Prompt P1.27 — Admin console (payouts safety fix + ops + support)
 ```
-Build the ops health view (VCH-ADM-01): per-user TG session, broker status, last signal/trade age, error rate. Worker supervision with heartbeat + auto-restart within 60s (VCH-ADM-02). Wire Sentry + BetterStack; structured audit/event logging with NO secrets (VCH-ADM-03). Manual account undeploy/redeploy for cost control (VCH-ADM-04).
+Build the Admin console (PRD §6.14) as a role-gated area under an `admin` permission, server-side authorised on every route (VCH-ADMIN-01); non-admins get no access. Sections:
+1) PAYOUTS (VCH-ADMIN-02) — list payout requests (affiliate, amount, method, status); approve, mark paid (record provider_transfer_id/reference), or mark failed; each transition logged to audit_events.
+2) PAYOUT BALANCE SAFETY FIX (VCH-ADMIN-03, fixes a live defect) — currently requesting a payout ZEROES the affiliate's pending balance immediately, before any money moves, with no restore on failure. Change this: on request, move the amount from pending into a locked/processing state (do NOT zero it); clear it to $0 only when the payout is marked PAID; on FAILED, return the amount to pending automatically. Migrate the affiliate_accounts/payouts schema as needed (e.g. add locked_payout_usd or a processing state) and backfill any existing orphaned payout rows safely.
+3) USER & SUBSCRIPTION LOOKUP (VCH-ADMIN-04) — search a user; view plan/subscription status, broker + Telegram connection status, recent signals/trades, referral/affiliate state — for support.
+4) OPS HEALTH (VCH-ADMIN-05, absorbs the former VCH-ADM-01 view) — per-user TG session, broker status, last signal/trade age, error rate, calendar-feed health; worker supervision heartbeat + auto-restart within 60s (VCH-ADM-02); Sentry + BetterStack; structured audit logging with NO secrets (VCH-ADM-03); manual account undeploy/redeploy (VCH-ADM-04).
+5) SUBSCRIPTION ACTIONS (VCH-ADMIN-07, optional) — view invoices; trigger Stripe/Paystack refund/cancel where allowed, logged.
+Do NOT build automated payout disbursement (Stripe/Paystack/Wise/crypto Transfers) — payouts stay manual at launch; the console just makes them safe and auditable. (The Phase 2 Rule Monitor approval queue, VCH-ADMIN-06, will live here too under the rule_approver role.)
+```
+
+## Prompt P1.27-note — (ops health moved into the admin console above)
+```
+The standalone ops view from the earlier plan is now section 4 of the Admin console (P1.27). No separate page needed.
 ```
 
 ## Prompt P1.28 — Security & disclaimer pass

@@ -230,6 +230,8 @@ export interface AffiliateAccountRow {
   total_signups: number;
   total_active_referrals: number;
   pending_payout_usd: number;
+  /** Amount moved out of pending while a payout is in flight (request → paid/failed). */
+  locked_payout_usd: number;
   lifetime_paid_usd: number;
   payout_method: PayoutMethod | null;
   payout_details_encrypted: string | null;
@@ -245,6 +247,8 @@ export interface PayoutRow {
   status: PayoutStatus;
   method: PayoutMethod;
   provider_transfer_id: string | null;
+  processed_by: string | null;
+  failure_reason: string | null;
   paid_at: string | null;
   created_at: string;
   updated_at: string;

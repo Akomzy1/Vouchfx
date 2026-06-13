@@ -28,6 +28,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [brokerLabel, setBrokerLabel] = useState<string | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<ConnStatus>("none");
   const [onTrial, setOnTrial] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const pathname = usePathname();
 
   const title = TITLES.find(([p]) => pathname.startsWith(p))?.[1] ?? "";
@@ -43,6 +44,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = supabase as any;
+
+    // Show the Admin link only to admins (is_admin is RLS-safe, scoped to the
+    // caller). The /admin routes are independently gated server-side regardless.
+    db.rpc("is_admin").then(({ data }: { data: boolean | null }) => setIsAdmin(data === true));
 
     db.from("broker_connections")
       .select("label, status, is_active")
@@ -85,6 +90,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         onClose={() => setSidebarOpen(false)}
         email={user?.email ?? ""}
         onTrial={onTrial}
+        isAdmin={isAdmin}
       />
 
       <div className="dot-grid relative flex flex-1 flex-col min-w-0 overflow-hidden">

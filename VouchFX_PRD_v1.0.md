@@ -246,7 +246,7 @@ Two distinct programs. **Provider affiliate** is the primary acquisition channel
 | VCH-REF-02 | Affiliate dashboard: clicks, signups, trial→paid conversions, active referrals, earnings (pending vs paid), payout history | M | All figures display from mock/real data; updates as referrals convert |
 | VCH-REF-03 | Attribution: tracked via link/code (cookie + binding at signup); attributed for the life of the referred subscription; last-touch wins | M | A referred user remains attributed across renewals until they churn |
 | VCH-REF-04 | Commission accrues only on successfully collected paid subscriptions (not trials); clawback on refund/chargeback | M | Trial signups earn $0; a refunded payment reverses its commission |
-| VCH-REF-05 | Payouts: minimum threshold ($50), monthly cycle, via Paystack (NGN) / bank / Wise / crypto; payout method set by affiliate | M | Below threshold rolls over; at/above threshold is payable; method selectable |
+| VCH-REF-05 | Payouts: minimum threshold ($50), monthly cycle, via Paystack (NGN) / bank / Wise / crypto; payout method set by affiliate. Requesting a payout **locks** the balance (moves pending→processing), never zeroes it; it clears only on paid and restores on failed (see VCH-ADMIN-03). Disbursement is actioned via the admin console (manual at launch) | M | Below threshold rolls over; at/above threshold is payable; method selectable; a requested-but-unpaid payout never destroys the balance |
 | VCH-REF-06 | User referral program: every user has a referral link; **referrer earns 20% recurring as account credit**; **referred user gets 20% off their first month** | S | Referrer's next invoice is credited; referred user's first charge is discounted 20% |
 | VCH-REF-07 | Share assets: one-tap copy of referral link, a ready-made Telegram message, and a QR code | S | User can copy link/message and download/scan QR |
 | VCH-REF-08 | Fraud & abuse controls: self-referral blocked, duplicate-account/device detection, commission only post-conversion | M | Self-referral and obvious duplicate signups earn no commission |
@@ -280,6 +280,22 @@ Makes VouchFX prop-firm-native: the user selects their firm + challenge, VouchFX
 | VCH-PROP-13 | Approval queue + approver role: a first-class "rule approver" permission and a queue showing each flagged change as old → new value, source link, detected date, and agent confidence, with Approve / Reject / Edit actions | C | An approver sees the queue, can open the source, and approve/reject/edit; non-approvers cannot publish rule changes |
 | VCH-PROP-14 | Version-stamping + audit trail: every ruleset version stores who/what published it (agent auto or approver name), when, and the source; the user-facing "rules last verified" date reflects the latest verification | C | Each firm preset shows a last-verified date; every change is attributable to an actor and source in an append-only log |
 | VCH-PROP-15 | Reversible rollback: any published ruleset version can be rolled back to a prior version | C | An approver can revert a firm to a previous ruleset version; the rollback is logged |
+
+### 6.14 Admin console
+
+A single role-gated admin area for VouchFX operations — consolidating what were scattered/orphaned surfaces (payouts, ops health, the rule approval queue) plus the user/subscription lookup support needs. Access via an `admin` role/permission; every admin action is written to `audit_events`.
+
+| ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| VCH-ADMIN-01 | Role-gated admin area: an `admin` permission distinct from end users (and from the `rule_approver` role); all admin routes server-side authorised | M | Non-admins cannot access or call any admin route; access is enforced server-side, not just hidden in UI |
+| VCH-ADMIN-02 | Payout management: list payout requests with affiliate, amount, method, status; approve, mark paid (recording `provider_transfer_id` / reference), or mark failed | M | An admin can move a payout pending → processing → paid/failed; each transition is logged and attributable |
+| VCH-ADMIN-03 | **Payout balance safety (fixes the zeroing defect):** requesting a payout moves the amount from `pending` into a `locked/processing` state — it is NOT zeroed. Balance clears only when the payout is marked **paid**; a **failed** payout returns the amount to `pending` | M | A requested-but-unpaid payout never destroys the affiliate's balance; a failed disbursement restores it automatically |
+| VCH-ADMIN-04 | User & subscription lookup (support): search a user; view their plan/subscription status, broker/Telegram connection status, recent signals/trades, and referral/affiliate state | M | An admin can locate any user and see the state needed to resolve a support request |
+| VCH-ADMIN-05 | Ops health view (absorbs VCH-ADM-01): per-user Telegram session, broker status, last signal/trade age, error rate, feed health | M | The ops health view lives within the admin console |
+| VCH-ADMIN-06 | Rule Monitor approval queue (absorbs the Phase 2 VCH-PROP-13 queue) lives within the admin console under the `rule_approver` role | C | The rule approval queue is a section of the admin console |
+| VCH-ADMIN-07 | Subscription actions: view invoices and, where the processor allows, trigger a refund/cancel (Stripe/Paystack) with the action logged | S | An admin can action a refund/cancel for a user; the action and processor result are logged |
+
+Note: automated payout disbursement (Stripe/Paystack/Wise/crypto Transfers) is **deferred** — payouts are actioned manually by an admin at low volume (VCH-REF-05's monthly cycle). The admin console makes manual payouts safe and auditable; automation is added when volume justifies it.
 
 ---
 

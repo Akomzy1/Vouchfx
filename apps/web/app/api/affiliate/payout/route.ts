@@ -39,35 +39,23 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const affId = (aff as { id: string }).id;
-
-  // Insert payout request and zero out pending balance atomically
+  // Atomic: move the full pending balance into the locked/processing state and
+  // create the payout row (VCH-ADMIN-03). The amount is NOT zeroed-and-lost —
+  // it stays as locked_payout_usd until an admin marks the payout PAID, and is
+  // returned to pending automatically if the payout is marked FAILED.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: payoutErr } = await (serviceDb as any)
-    .from("payouts")
-    .insert({
-      affiliate_account_id: affId,
-      user_id: user.id,
-      amount_usd: pending,
-      status: "pending",
-      method,
-    });
+  const { error: rpcErr } = await (serviceDb as any).rpc("fn_request_payout", {
+    p_user_id: user.id,
+    p_amount: pending,
+    p_method: method,
+  });
 
-  if (payoutErr) return NextResponse.json({ error: "Failed to create payout request" }, { status: 500 });
-
-  // Zero out pending balance
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (serviceDb as any)
-    .from("affiliate_accounts")
-    .update({ pending_payout_usd: 0 })
-    .eq("id", affId);
-
-  // Update preferred payout method
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (serviceDb as any)
-    .from("affiliate_accounts")
-    .update({ payout_method: method })
-    .eq("id", affId);
+  if (rpcErr) {
+    const msg = rpcErr.message?.includes("insufficient_balance")
+      ? "Balance changed — please refresh and try again."
+      : "Failed to create payout request";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true, amount_usd: pending });
 }

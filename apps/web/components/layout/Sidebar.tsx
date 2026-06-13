@@ -15,6 +15,7 @@ import {
   Sparkles,
   ChevronsUpDown,
   LogOut,
+  Lock,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -49,11 +50,13 @@ interface SidebarProps {
   onClose: () => void;
   email?: string;
   onTrial?: boolean;
+  isAdmin?: boolean;
 }
 
-export default function Sidebar({ open, onClose, email = "", onTrial = false }: SidebarProps) {
+export default function Sidebar({ open, onClose, email = "", onTrial = false, isAdmin = false }: SidebarProps) {
   const pathname = usePathname();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const nav = isAdmin ? [...NAV, { href: "/admin/payouts", label: "Admin", icon: Lock }] : NAV;
 
   const initials = email.slice(0, 2).toUpperCase() || "—";
   const name = email.split("@")[0] ?? "";
@@ -86,7 +89,7 @@ export default function Sidebar({ open, onClose, email = "", onTrial = false }: 
 
         {/* Nav */}
         <nav className="mt-7 flex flex-1 flex-col gap-1 overflow-y-auto scroll-thin">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {nav.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
             return (
               <Link
