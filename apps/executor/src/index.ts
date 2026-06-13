@@ -25,6 +25,7 @@ import { createAdminClientFromEnv } from "@vouchfx/db";
 import { createWorker } from "./worker";
 import { startRuleMonitorSchedule } from "./rule-monitor";
 import { startCalendarSchedule } from "./calendar";
+import { startCommissionSweep } from "./commission";
 
 const env = parseEnv();
 const log = createLogger("executor");
@@ -107,6 +108,9 @@ const stopCalendar = startCalendarSchedule({
   resendApiKey: env.RESEND_API_KEY ?? null,
   adminEmails: env.ADMIN_EMAILS ?? null,
 });
+
+// Mature referral/affiliate commissions past their 14-day refund window.
+const stopCommissionSweep = startCommissionSweep(db, log);
 
 worker.on("completed", (job) => {
   log.info("job completed", { jobId: job.id });
@@ -221,6 +225,7 @@ async function shutdown(): Promise<void> {
   stopHeartbeat?.();
   stopRuleMonitor();
   stopCalendar();
+  stopCommissionSweep();
   clearInterval(heartbeatTimer);
   clearInterval(killPollTimer);
   await worker.close();

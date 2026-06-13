@@ -215,11 +215,35 @@ export interface ReferralRow {
   referrer_id: string;
   referee_id: string;
   referral_code: string;
+  /** Which program earns on this user: affiliate=cash, referral=account credit. */
+  source_type: "affiliate" | "referral";
   status: ReferralStatus;
   first_paid_at: string | null;
+  /** Affiliate cash stops after this (conversion + 12 months); null for referral credit. */
+  commission_until: string | null;
+  locked_at: string | null;
   first_month_discount_applied: boolean;
   created_at: string;
 }
+
+export interface CommissionLedgerRow {
+  id: string;
+  referral_id: string;
+  referee_id: string;
+  beneficiary_id: string;
+  kind: "cash" | "credit";
+  payment_reference: string;
+  gross_usd: number;
+  amount_usd: number;
+  status: "maturing" | "matured" | "clawed_back";
+  accrued_at: string;
+  matures_at: string;
+  matured_at: string | null;
+  clawed_back_at: string | null;
+}
+
+export type CommissionLedgerInsert = Omit<CommissionLedgerRow, "id" | "accrued_at" | "status" | "matured_at" | "clawed_back_at"> &
+  Partial<Pick<CommissionLedgerRow, "id" | "accrued_at" | "status" | "matured_at" | "clawed_back_at">>;
 
 export interface AffiliateAccountRow {
   id: string;
@@ -232,6 +256,8 @@ export interface AffiliateAccountRow {
   pending_payout_usd: number;
   /** Amount moved out of pending while a payout is in flight (request → paid/failed). */
   locked_payout_usd: number;
+  /** Matured referral (credit-program) earnings, applied against the user's own bill. */
+  credit_balance_usd: number;
   lifetime_paid_usd: number;
   payout_method: PayoutMethod | null;
   payout_details_encrypted: string | null;
@@ -578,6 +604,11 @@ export interface Database {
         Row: PushSubscriptionRow;
         Insert: PushSubscriptionInsert;
         Update: Partial<PushSubscriptionInsert>;
+      } & NoRelationships;
+      commission_ledger: {
+        Row: CommissionLedgerRow;
+        Insert: CommissionLedgerInsert;
+        Update: Partial<CommissionLedgerInsert>;
       } & NoRelationships;
     };
     Views: Record<string, never>;

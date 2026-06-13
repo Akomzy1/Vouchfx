@@ -13,16 +13,20 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      // Bind referral attribution from cookie (VCH-REF-03)
+      // Bind referral attribution from the cookie (VCH-REF-03). The cookie
+      // value is "<source>:<CODE>" (source = affiliate|referral). Legacy values
+      // without a prefix are treated as the referral (credit) program.
       try {
         const cookieStore = await cookies();
-        const refCode = cookieStore.get("vouchfx_ref")?.value;
-        if (refCode) {
+        const raw = cookieStore.get("vouchfx_ref")?.value;
+        if (raw) {
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
+            const [maybeSource, maybeCode] = raw.includes(":") ? raw.split(":") : ["referral", raw];
+            const source = maybeSource === "affiliate" ? "affiliate" : "referral";
             const serviceDb = createServiceClient();
-            await bindReferral(serviceDb, user.id, refCode);
-            // Clear the cookie — attribution is now bound in DB
+            // Cookie-bound: not explicit, so it never overrides an existing slot.
+            await bindReferral(serviceDb, user.id, (maybeCode ?? "").trim(), source, false);
             const response = NextResponse.redirect(`${origin}${next}`);
             response.cookies.delete("vouchfx_ref");
             return response;

@@ -21,6 +21,11 @@ export async function POST(request: Request) {
 
   const serviceDb = createServiceClient();
 
+  // Mature any commissions past their refund window first, so the balance check
+  // below sees up-to-date funds (idempotent).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (serviceDb as any).rpc("fn_settle_matured_commissions").catch(() => undefined);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: aff } = await (serviceDb as any)
     .from("affiliate_accounts")

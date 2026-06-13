@@ -56,115 +56,105 @@ export async function ensureAffiliateAccount(
   };
 }
 
+export type ReferralSource = "affiliate" | "referral";
+
 /**
- * Binds a referral at signup.
- *   - Looks up the referrer by referral_code in `users`
- *   - Blocks self-referral
- *   - Inserts into `referrals` (UNIQUE referee_id prevents double-bind)
- *   - Increments referrer's affiliate_accounts.total_signups
+ * Binds a referred user to the ONE attribution slot at signup (VCH-REF-03).
  *
- * Returns the referrer_id on success, null if code is invalid or self-referral.
+ * - Resolves the referrer by code; blocks self-referral (VCH-REF-08).
+ * - Stores source_type (affiliate=cash / referral=credit) and locks the bind.
+ * - Precedence: an EXPLICIT code entered at signup overrides an existing
+ *   cookie-bound slot, but only while it hasn't earned yet (no first payment).
+ *   A cookie never overrides an existing slot. Once a payment has been
+ *   collected, the slot is immutable.
+ *
+ * Returns the referrer_id bound, or null if invalid / self / not overridable.
  */
 export async function bindReferral(
   db: SupabaseClient,
   refereeId: string,
-  referralCode: string
+  referralCode: string,
+  source: ReferralSource = "referral",
+  explicit = false
 ): Promise<string | null> {
   if (!referralCode) return null;
+  const code = referralCode.toUpperCase();
 
-  // Find referrer
   const { data: referrerRow } = await db
     .from("users")
     .select("id")
-    .eq("referral_code", referralCode.toUpperCase())
+    .eq("referral_code", code)
     .maybeSingle();
-
   if (!referrerRow) return null;
   const referrerId = (referrerRow as { id: string }).id;
 
-  // Block self-referral (VCH-REF-08)
-  if (referrerId === refereeId) return null;
+  if (referrerId === refereeId) return null; // self-referral
 
-  // Insert referral (ON CONFLICT DO NOTHING — UNIQUE referee_id)
-  await db.from("referrals").upsert(
-    {
+  const { data: existing } = await db
+    .from("referrals")
+    .select("id, first_paid_at")
+    .eq("referee_id", refereeId)
+    .maybeSingle();
+
+  const now = new Date().toISOString();
+
+  if (existing) {
+    const ex = existing as { id: string; first_paid_at: string | null };
+    // Only an explicit code may override, and only before any payout has earned.
+    if (!explicit || ex.first_paid_at) return null;
+    await db.from("referrals").update({
       referrer_id: referrerId,
-      referee_id: refereeId,
-      referral_code: referralCode.toUpperCase(),
-    },
-    { onConflict: "referee_id", ignoreDuplicates: true }
-  );
+      referral_code: code,
+      source_type: source,
+      locked_at: now,
+    }).eq("id", ex.id);
+    await ensureAffiliateAccount(db, referrerId);
+    return referrerId;
+  }
 
-  // Ensure referrer has an affiliate_accounts row and bump signup count
+  await db.from("referrals").insert({
+    referrer_id: referrerId,
+    referee_id: refereeId,
+    referral_code: code,
+    source_type: source,
+    locked_at: now,
+  });
+
   await ensureAffiliateAccount(db, referrerId);
   await db.rpc("increment_affiliate_signups", { p_user_id: referrerId });
 
   return referrerId;
 }
 
-const COMMISSION_RATE = 0.20;
-
 /**
- * Accrues 20% commission to the referrer when a referred user's payment is collected.
- * Marks first_paid_at and converts status to 'converted' on the first payment.
- * amountUsd: the amount actually charged (after any discounts).
+ * Accrues commission for one collected payment (VCH-REF-01/04/06).
+ * Idempotent on paymentReference — a payment can earn at most once. Writes a
+ * 'maturing' ledger row (payable after the 14-day refund window); the 12-month
+ * affiliate cap and cash-vs-credit routing are enforced inside the RPC.
+ * Trials never reach here (no payment → no call).
  */
 export async function accrueCommission(
   db: SupabaseClient,
   refereeUserId: string,
-  amountUsd: number
+  grossUsd: number,
+  paymentReference: string
 ): Promise<void> {
-  const { data: referral } = await db
-    .from("referrals")
-    .select("id, referrer_id, status, first_paid_at")
-    .eq("referee_id", refereeUserId)
-    .maybeSingle();
-
-  if (!referral) return;
-
-  const r = referral as { id: string; referrer_id: string; status: string; first_paid_at: string | null };
-  const commission = Math.round(amountUsd * COMMISSION_RATE * 100) / 100;
-
-  // Update referral status on first payment
-  if (r.status === "pending") {
-    await db.from("referrals").update({
-      status: "converted",
-      first_paid_at: new Date().toISOString(),
-    }).eq("id", r.id);
-  }
-
-  // Ensure referrer has an affiliate account
-  await ensureAffiliateAccount(db, r.referrer_id);
-
-  // Increment pending_payout_usd and total_active_referrals (on first conversion)
-  await db.rpc("accrue_affiliate_commission", {
-    p_user_id: r.referrer_id,
-    p_commission_usd: commission,
-    p_first_conversion: r.status === "pending",
+  if (!paymentReference || !(grossUsd > 0)) return;
+  await db.rpc("fn_accrue_commission", {
+    p_payment_reference: paymentReference,
+    p_referee_id: refereeUserId,
+    p_gross_usd: grossUsd,
   });
 }
 
 /**
- * Claws back commission on refund/chargeback.
+ * Reverses commission for a refunded/charged-back payment (VCH-REF-04).
+ * Idempotent on paymentReference; reverses the matured balance if already credited.
  */
 export async function clawbackCommission(
   db: SupabaseClient,
-  refereeUserId: string,
-  amountUsd: number
+  paymentReference: string
 ): Promise<void> {
-  const { data: referral } = await db
-    .from("referrals")
-    .select("referrer_id")
-    .eq("referee_id", refereeUserId)
-    .maybeSingle();
-
-  if (!referral) return;
-
-  const r = referral as { referrer_id: string };
-  const commission = Math.round(amountUsd * COMMISSION_RATE * 100) / 100;
-
-  await db.rpc("clawback_affiliate_commission", {
-    p_user_id: r.referrer_id,
-    p_commission_usd: commission,
-  });
+  if (!paymentReference) return;
+  await db.rpc("fn_clawback_commission", { p_payment_reference: paymentReference });
 }

@@ -17,9 +17,11 @@ export default async function ReferPage() {
   if (!user) redirect("/login");
 
   const serviceDb = createServiceClient();
-  const { referral_code, referral_link_slug } = await ensureAffiliateAccount(serviceDb, user.id);
+  const { referral_code } = await ensureAffiliateAccount(serviceDb, user.id);
 
-  const referralLink = `${APP_URL}/?ref=${referral_link_slug}`;
+  // User referral (account-credit) program link (VCH-REF-06). The affiliate
+  // cash link (/r/CODE, VCH-REF-01) is issued separately to approved affiliates.
+  const referralLink = `${APP_URL}/ref/${referral_code}`;
   const telegramText = `I've been using VouchFX to auto-copy Telegram signals to MT5 — it's really good.\n\nSign up free (7-day trial, no card required): ${referralLink}`;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

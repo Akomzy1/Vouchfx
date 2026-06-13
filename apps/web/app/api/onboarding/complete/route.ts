@@ -15,7 +15,9 @@ export async function POST(request: Request) {
       const { createServiceClient } = await import("@/lib/supabase/service");
       const { bindReferral } = await import("@/lib/referral");
       const serviceDb = createServiceClient();
-      await bindReferral(serviceDb, user.id, body.referralCode.trim());
+      // Explicitly typed code → referral (credit) program, and it overrides any
+      // cookie-bound slot (VCH-REF-03: explicit beats cookie) while unearned.
+      await bindReferral(serviceDb, user.id, body.referralCode.trim(), "referral", true);
     } catch {
       // Referral bind failure must never block onboarding completion
     }

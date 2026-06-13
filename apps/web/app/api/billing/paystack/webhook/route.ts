@@ -66,7 +66,8 @@ async function handleChargeSuccess(db: ReturnType<typeof createServiceClient>, d
   // plan's canonical USD price — stable, FX-independent, and identical to what
   // the same plan earns via Stripe. Only trust amount/100 for real USD charges.
   const amountUsd = txn.currency === "USD" ? txn.amount / 100 : PLAN_USD_PRICE[plan];
-  accrueCommission(db, userId, amountUsd).catch(() => undefined);
+  // Idempotent on the Paystack reference — a payment earns at most one commission.
+  accrueCommission(db, userId, amountUsd, `ps_${txn.reference}`).catch(() => undefined);
 
   // For lifetime (one-off payment) insert a permanent subscription
   if (plan === "lifetime") {

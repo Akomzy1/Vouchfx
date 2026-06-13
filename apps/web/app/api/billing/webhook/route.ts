@@ -55,10 +55,12 @@ export async function POST(request: Request) {
             provider_subscription_id: session.payment_intent as string | null ?? null,
             provider_customer_id:    session.customer as string | null ?? null,
           });
-          // Commission on lifetime purchase
+          // Commission on lifetime purchase (one-off). Keyed on the session id
+          // for idempotency. Lifetime affiliate commission is one-off — the
+          // 12-month cap is moot since there are no recurring invoices.
           if (session.amount_total) {
             const amountUsd = session.amount_total / 100;
-            await accrueCommission(db, userId, amountUsd).catch(() => undefined);
+            await accrueCommission(db, userId, amountUsd, `cs_${session.id}`).catch(() => undefined);
           }
         }
         // Recurring: subscription.updated fires next with full subscription data
@@ -95,7 +97,8 @@ export async function POST(request: Request) {
 
         if (userId && invoice.amount_paid > 0) {
           const amountUsd = invoice.amount_paid / 100;
-          await accrueCommission(db, userId, amountUsd).catch(() => undefined);
+          // Idempotent per invoice — a renewal can earn at most one commission.
+          await accrueCommission(db, userId, amountUsd, `inv_${invoice.id}`).catch(() => undefined);
         }
         break;
       }
@@ -116,28 +119,32 @@ export async function POST(request: Request) {
       case "charge.refunded": {
         const charge = event.data.object as Stripe.Charge;
         const customerId = charge.customer as string | null;
-        if (!customerId) break;
 
-        // Look up user by stripe_customer_id for commission clawback
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: userRow } = await (db as any)
-          .from("users")
-          .select("id")
-          .eq("stripe_customer_id", customerId)
-          .maybeSingle();
-
-        if (userRow) {
-          const amountUsd = charge.amount_refunded / 100;
-          await clawbackCommission(db, (userRow as { id: string }).id, amountUsd).catch(() => undefined);
+        // Clawback is keyed on the same payment_reference used at accrual: the
+        // invoice id (recurring) or the checkout session (lifetime). Reverses
+        // the exact ledger row(s) for that payment — idempotent.
+        const invoiceId = (charge as { invoice?: string }).invoice;
+        if (invoiceId) {
+          await clawbackCommission(db, `inv_${invoiceId}`).catch(() => undefined);
+        } else {
+          // Lifetime one-off: map charge → checkout session via payment_intent.
+          const pi = charge.payment_intent as string | null;
+          if (pi) {
+            const sessions = await stripe.checkout.sessions.list({ payment_intent: pi, limit: 1 });
+            const sid = sessions.data[0]?.id;
+            if (sid) await clawbackCommission(db, `cs_${sid}`).catch(() => undefined);
+          }
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (db as any)
-          .from("subscriptions")
-          .update({ status: "cancelled" })
-          .eq("provider_customer_id", customerId)
-          .eq("provider", "stripe")
-          .eq("status", "active");
+        if (customerId) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (db as any)
+            .from("subscriptions")
+            .update({ status: "cancelled" })
+            .eq("provider_customer_id", customerId)
+            .eq("provider", "stripe")
+            .eq("status", "active");
+        }
         break;
       }
 

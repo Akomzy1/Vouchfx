@@ -62,13 +62,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL(`/login?next=${next}`, request.url));
   }
 
-  // Capture referral code from ?ref= query param — set 30-day cookie for attribution
+  // Legacy ?ref=CODE capture → referral (credit) program, 60-day window
+  // (VCH-REF-03). The /r/CODE and /ref/CODE routes are the canonical link types;
+  // this keeps older ?ref= links working and stores the unified "source:code".
   const ref = request.nextUrl.searchParams.get("ref");
   if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) {
-    supabaseResponse.cookies.set("vouchfx_ref", ref.toUpperCase(), {
+    supabaseResponse.cookies.set("vouchfx_ref", `referral:${ref.toUpperCase()}`, {
       httpOnly: true,
       path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: 60 * 60 * 24 * 60, // 60 days
       sameSite: "lax",
     });
   }
