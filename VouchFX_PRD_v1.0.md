@@ -315,7 +315,7 @@ Note: automated payout disbursement (Stripe/Paystack/Wise/crypto Transfers) is *
 | NFR-03 | Availability | 24/7 worker operation; per-user listener auto-recovers; target 99.5% control-plane uptime |
 | NFR-04 | Scalability | Architecture supports 3,000+ concurrent users without redesign; worker pools scale horizontally |
 | NFR-05 | Security | Credentials & session strings AES-GCM encrypted at rest (KMS-wrapped); decrypted only in worker memory; never logged; TLS in transit; RLS multi-tenant isolation |
-| NFR-06 | Privacy | Store only what's needed; user can delete account, broker creds, and Telegram session |
+| NFR-06 | Privacy | Store only what's needed; user can delete account, broker creds, and Telegram session. **Account deletion detaches the person from retained records rather than hard-cascading**: (a) financial/audit records — commission/credit ledger, payouts, invoices — are NEVER deleted by a user deletion (retain for audit/compliance); (b) referral link references (referrer/referee) are nullable and set to NULL on deletion, retaining the row; (c) deletion is **blocked (or must be settled first) when the user has an unpaid/owed affiliate balance**. Net: personal data is removed per the user's right, but the financial trail and any counterparty's earned money survive |
 | NFR-07 | Observability | Per-signal trace; per-user health metrics; error alerting to ops |
 | NFR-08 | Cost | Per-Starter-user variable COGS tracked; alert if MetaApi/LLM spend per user exceeds budget |
 
