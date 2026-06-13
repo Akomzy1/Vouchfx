@@ -31,18 +31,6 @@ export async function signUp(formData: FormData) {
   return { success: "Check your email to confirm your account." };
 }
 
-export async function signInWithGoogle(): Promise<void> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/auth/callback`,
-    },
-  });
-  if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  if (data.url) redirect(data.url);
-}
-
 export async function resetPassword(formData: FormData) {
   const supabase = await createClient();
   const email = formData.get("email") as string;
