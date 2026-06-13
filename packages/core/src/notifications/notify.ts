@@ -30,7 +30,8 @@ export async function notify(db: AnyDb, params: NotifyParams): Promise<void> {
   const {
     userId, toEmail, event, title, body,
     resendApiKey, pushSender,
-    fromEmail = "VouchFX Alerts <alerts@mail.vouchfx.com>",
+    // Must stay on the Resend-verified domain (vouchfx.com — root, not a subdomain)
+    fromEmail = "VouchFX Alerts <alerts@vouchfx.com>",
   } = params;
 
   // 1. Check preferences — missing row means all channels on
