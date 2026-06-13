@@ -192,7 +192,7 @@ export default async function SignalDetailPage({
 
   const [{ data: signal }, { data: trades }, { data: events }] = await Promise.all([
     db.from("parsed_signals")
-      .select("id, source_id, symbol, side, order_type, entries, sl, sl_unit, tps, tp_unit, confidence, reasoning, follow_up_type, language_detected, model_used, raw_text, is_signal, parsed_at, created_at")
+      .select("id, source_id, symbol, side, order_type, entries, sl, sl_unit, tps, tp_unit, confidence, reasoning, follow_up_type, language_detected, model_used, raw_text, is_signal, parsed_at")
       .eq("id", id)
       .single(),
     db.from("trades")
@@ -231,7 +231,6 @@ export default async function SignalDetailPage({
     raw_text: string | null;
     is_signal: boolean;
     parsed_at: string;
-    created_at: string;
   };
 
   const tradeRows = (trades ?? []) as {
@@ -410,7 +409,7 @@ export default async function SignalDetailPage({
             </span>
             <div className="min-w-0">
               <h2 className="truncate text-[17px] font-bold tracking-tight text-text-primary">{channelTitle}</h2>
-              <div className="num mt-0.5 text-[12px] text-text-muted">{fmt(sig.created_at)}</div>
+              <div className="num mt-0.5 text-[12px] text-text-muted">{fmt(sig.parsed_at)}</div>
             </div>
           </div>
 
@@ -470,7 +469,7 @@ export default async function SignalDetailPage({
                       {sig.raw_text ?? "(media message — parsed with the vision model)"}
                     </pre>
                     <div className="num mt-1.5 flex items-center justify-end gap-1 text-[10.5px] text-text-muted">
-                      {fmtTime(sig.created_at)}
+                      {fmtTime(sig.parsed_at)}
                     </div>
                   </div>
                 </div>
