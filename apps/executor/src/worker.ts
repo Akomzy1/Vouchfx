@@ -32,6 +32,7 @@ import {
   type BrokerConnection,
   type OrderRequest,
   type TradeRef,
+  type OrderChanges,
   type SignalJobData,
   type ParsedSignal,
   type PriorSignalContext,
@@ -408,6 +409,46 @@ async function checkDailyLimits(
 
 // ── Follow-up dispatch ────────────────────────────────────────────────────────
 
+/**
+ * Apply a modify (SL/TP change) to ONE leg, fault-tolerantly.
+ *  - returns "applied" on success (and patches the DB row)
+ *  - returns "missing" if the broker reports the position is gone (it was
+ *    closed externally) — the DB row is reconciled to CLOSED so it stops
+ *    matching future follow-ups
+ *  - rethrows any other (transient) error so BullMQ can retry the job
+ * One dead leg must never abort a batch of otherwise-valid legs.
+ */
+async function modifyLegSafe(
+  db: TypedClient,
+  executor: MetaApiExecutor,
+  brokerConn: BrokerConnection,
+  trade: TradeRow,
+  changes: OrderChanges,
+  dbPatch: Record<string, unknown>,
+  tag: string,
+  label: string
+): Promise<"applied" | "missing"> {
+  const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id! };
+  try {
+    await executor.modifyOrder(ref, changes);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db as any).from("trades").update(dbPatch).eq("id", trade.id);
+    console.log(`${tag} ${label} ${shortId(trade.id)} applied`);
+    return "applied";
+  } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    if (/not found|no position|position.*closed/i.test(msg)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from("trades")
+        .update({ status: "CLOSED", closed_at: new Date().toISOString() })
+        .eq("id", trade.id);
+      console.warn(`${tag} ${label} ${shortId(trade.id)} — position gone on broker; reconciled to CLOSED`);
+      return "missing";
+    }
+    throw err; // genuine/transient error → let the job retry
+  }
+}
+
 async function dispatchFollowUp(
   tag: string,
   db: TypedClient,
@@ -459,15 +500,20 @@ async function dispatchFollowUp(
         await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "MODIFY_SL_no_sl_value" } });
         return;
       }
+      let applied = 0, missing = 0;
       for (const trade of activeTrades) {
         if (!trade.broker_order_id) continue;
-        const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id };
-        await executor.modifyOrder(ref, { sl: parsed.sl });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (db as any).from("trades").update({ sl: parsed.sl }).eq("id", trade.id);
-        console.log(`${tag} MODIFY_SL ${shortId(trade.id)} sl→${parsed.sl}`);
+        const r = await modifyLegSafe(
+          db, executor, brokerConn, trade,
+          { sl: parsed.sl }, { sl: parsed.sl }, tag, "MODIFY_SL",
+        );
+        if (r === "applied") applied++; else missing++;
       }
-      await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_sl: parsed.sl, legs: activeTrades.length } });
+      if (applied > 0) {
+        await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_sl: parsed.sl, legs: applied, skipped_missing: missing } });
+      } else {
+        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "no_live_positions_to_modify", missing } });
+      }
       break;
     }
 
@@ -477,30 +523,41 @@ async function dispatchFollowUp(
         return;
       }
       // Assign new TPs round-robin across legs (most common case: 1 new TP for 1 leg)
+      let applied = 0, missing = 0;
       for (let i = 0; i < activeTrades.length; i++) {
         const trade = activeTrades[i]!;
         if (!trade.broker_order_id) continue;
         const newTp = parsed.tps[i % parsed.tps.length]!;
-        const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id };
-        await executor.modifyOrder(ref, { tp: newTp });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (db as any).from("trades").update({ tp: newTp }).eq("id", trade.id);
-        console.log(`${tag} MODIFY_TP ${shortId(trade.id)} tp→${newTp}`);
+        const r = await modifyLegSafe(
+          db, executor, brokerConn, trade,
+          { tp: newTp }, { tp: newTp }, tag, "MODIFY_TP",
+        );
+        if (r === "applied") applied++; else missing++;
       }
-      await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_tps: parsed.tps, legs: activeTrades.length } });
+      if (applied > 0) {
+        await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_tps: parsed.tps, legs: applied, skipped_missing: missing } });
+      } else {
+        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "no_live_positions_to_modify", missing } });
+      }
       break;
     }
 
     case "MOVE_TO_BE": {
+      let applied = 0, missing = 0;
       for (const trade of activeTrades) {
         if (!trade.broker_order_id || !trade.entry_price) continue;
-        const ref: TradeRef = { connectionId: brokerConn.id, brokerId: trade.broker_order_id };
-        await executor.modifyOrder(ref, { sl: trade.entry_price });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (db as any).from("trades").update({ sl: trade.entry_price }).eq("id", trade.id);
-        console.log(`${tag} MOVE_TO_BE ${shortId(trade.id)} sl→entry ${trade.entry_price}`);
+        const r = await modifyLegSafe(
+          db, executor, brokerConn, trade,
+          { sl: trade.entry_price }, { sl: trade.entry_price, breakeven_applied: true },
+          tag, "MOVE_TO_BE",
+        );
+        if (r === "applied") applied++; else missing++;
       }
-      await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, legs: activeTrades.length } });
+      if (applied > 0) {
+        await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, legs: applied, skipped_missing: missing } });
+      } else {
+        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "no_live_positions_to_modify", missing } });
+      }
       break;
     }
 
