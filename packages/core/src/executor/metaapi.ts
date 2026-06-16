@@ -267,7 +267,17 @@ export class MetaApiExecutor implements Executor {
 
   async modifyOrder(ref: TradeRef, changes: OrderChanges): Promise<void> {
     const connection = await this.rpc(ref.connectionId);
-    await connection.modifyPosition(ref.brokerId, changes.sl, changes.tp);
+    let sl = changes.sl;
+    let tp = changes.tp;
+    // modifyPosition REPLACES both SL and TP — a missing value wipes that side.
+    // Preserve the side we're not changing by reading it from the live position.
+    if (sl === undefined || tp === undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pos: any = await connection.getPosition(ref.brokerId);
+      if (sl === undefined) sl = (pos?.stopLoss as number | undefined);
+      if (tp === undefined) tp = (pos?.takeProfit as number | undefined);
+    }
+    await connection.modifyPosition(ref.brokerId, sl, tp);
   }
 
   async cancelPending(ref: TradeRef): Promise<void> {
