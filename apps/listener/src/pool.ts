@@ -19,6 +19,7 @@ import { parseEnv } from "@vouchfx/config";
 import { createReadonlyClient, probeConnection, startListening, subscribeDeletes } from "./listener";
 import type { ReadonlyTelegramClient } from "./readonly-guard";
 import { updateSessionStatus } from "./session-manager";
+import { alertEnqueueFailure } from "./ops-alert";
 
 const SPIKE_SOURCE_ID = "00000000-0000-0000-0000-000000000002";
 const SPIKE_BROKER_ID = "00000000-0000-0000-0000-000000000001";
@@ -290,13 +291,20 @@ export class UserPool {
         brokerConnectionId,
       };
 
-      await this.queue.add("signal", jobData, {
-        jobId: idempotencyKey,
-        attempts: 3,
-        backoff: { type: "exponential", delay: 2000 },
-      });
-
-      console.log(`[pool] user=${userId} enqueued job=${idempotencyKey}`);
+      try {
+        await this.queue.add("signal", jobData, {
+          jobId: idempotencyKey,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 2000 },
+        });
+        console.log(`[pool] user=${userId} enqueued job=${idempotencyKey}`);
+      } catch (err) {
+        // A received signal that can't be queued is a dropped signal — alert ops.
+        await alertEnqueueFailure(this.db, this.env, {
+          idempotencyKey,
+          error: (err as Error).message,
+        });
+      }
     });
 
     // Subscribe to delete events — channels/supergroups only; chats filter
@@ -380,13 +388,19 @@ export class UserPool {
       cancelTargetSignalId: parsedSignalId,
     };
 
-    await this.queue.add("signal", jobData, {
-      jobId: idempotencyKey,
-      attempts: 3,
-      backoff: { type: "exponential", delay: 2000 },
-    });
-
-    console.log(`[pool] delete msg=${messageId} → cancel job enqueued (signal=${parsedSignalId.slice(0, 8)})`);
+    try {
+      await this.queue.add("signal", jobData, {
+        jobId: idempotencyKey,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 2000 },
+      });
+      console.log(`[pool] delete msg=${messageId} → cancel job enqueued (signal=${parsedSignalId.slice(0, 8)})`);
+    } catch (err) {
+      await alertEnqueueFailure(this.db, this.env, {
+        idempotencyKey,
+        error: (err as Error).message,
+      });
+    }
   }
 
   private async removeEntry(userId: string): Promise<void> {

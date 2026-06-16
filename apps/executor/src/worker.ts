@@ -155,6 +155,32 @@ async function findActiveTradesBySymbol(
 }
 
 /**
+ * Fallback for follow-ups with no message reference and no symbol
+ * (e.g. "Set SL to breakeven", "close it"): apply to the active trades opened
+ * from THIS channel's signals. A provider posting a bare management
+ * instruction in their channel means it for the trade(s) they just gave there.
+ */
+async function findActiveTradesBySource(
+  db: TypedClient,
+  sourceId: string
+): Promise<TradeRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: psRows } = await (db as any)
+    .from("parsed_signals")
+    .select("id")
+    .eq("source_id", sourceId);
+  const ids = ((psRows ?? []) as { id: string }[]).map((r) => r.id);
+  if (ids.length === 0) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from("trades")
+    .select("*")
+    .in("parsed_signal_id", ids)
+    .in("status", ["PENDING", "OPEN"]);
+  return (data ?? []) as TradeRow[];
+}
+
+/**
  * Fetch the MetaApi account ID and platform for a broker connection.
  * Throws if the connection is not found or has not yet been provisioned.
  */
@@ -410,13 +436,13 @@ async function dispatchFollowUp(
   if (references_prior_message_id) {
     activeTrades = await findActiveTrades(db, sourceId, references_prior_message_id);
     matchMethod = `msg_id=${references_prior_message_id}`;
-  } else if (parsed.references_prior_trade && parsed.symbol) {
+  } else if (parsed.symbol) {
     activeTrades = await findActiveTradesBySymbol(db, userId, parsed.symbol);
     matchMethod = `symbol=${parsed.symbol}`;
   } else {
-    console.log(`${tag} follow-up ${follow_up_type} — no message reference and no symbol, skipping`);
-    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "follow_up_no_reference" } });
-    return;
+    // No reply-reference and no symbol → apply to this channel's open trade(s).
+    activeTrades = await findActiveTradesBySource(db, sourceId);
+    matchMethod = "channel";
   }
 
   if (activeTrades.length === 0) {
@@ -1237,8 +1263,15 @@ async function processJob(
     vision: Boolean(imageBase64),
   };
 
-  // ── 4. Non-signals (chit-chat) never persist a row — nothing to review ─────
-  if (!parsed.is_signal) {
+  // Follow-ups (move-to-BE, modify SL/TP, close, cancel) manage an EXISTING
+  // trade. They legitimately parse with is_signal=false and sub-threshold
+  // confidence, so they must bypass the new-signal gates below and route to
+  // dispatchFollowUp instead of being dropped as "not a signal".
+  const followUpType = parsed.follow_up_type ?? "NEW_SIGNAL";
+  const isFollowUp = followUpType !== "NEW_SIGNAL" && followUpType !== "IGNORE";
+
+  // ── 4. Genuine non-signals (chit-chat / IGNORE) — nothing to act on ────────
+  if (!parsed.is_signal && !isFollowUp) {
     console.log(`${tag} skipped: not a signal`);
     await writeAuditEvent(db, { userId, eventType: "parsed", payload: parsedPayload });
     await writeAuditEvent(db, { userId, eventType: "skipped", payload: { reason: "not_a_signal" } });
@@ -1294,15 +1327,7 @@ async function processJob(
   // ── 6. Audit: parsed (now carries the signal id for deep-linking) ─────────
   await writeAuditEvent(db, { userId, eventType: "parsed", parsedSignalId, payload: parsedPayload });
 
-  // Confidence gate — skipped, but the row exists so the user can still review it.
-  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
-    const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
-    console.log(`${tag} skipped: ${reason}`);
-    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, confidence: parsed.confidence } });
-    return;
-  }
-
-  // ── 7. Broker connection + per-channel settings ──────────────────────────
+  // ── 7. Broker connection + per-channel settings (needed for both paths) ───
   const [brokerLookup, sourceResult] = await Promise.all([
     lookupBrokerConn(db, brokerConnectionId),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1338,14 +1363,23 @@ async function processJob(
     reverse: sourceRow?.reverse_trades === true,
   };
 
-  // ── 8. Route: follow-up or new signal ────────────────────────────────────
-  const followUpType = parsed.follow_up_type;
-
-  if (followUpType && followUpType !== "NEW_SIGNAL") {
+  // ── 8. Route: follow-up (manage existing trade) or new signal ─────────────
+  if (isFollowUp) {
+    // The new-signal confidence threshold does NOT apply here — dispatchFollowUp's
+    // trade-matching (reply-reference / symbol / channel) is the real guard.
     await dispatchFollowUp(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, sourceId);
-  } else {
-    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, sourceOverrides);
+    return;
   }
+
+  // New signal: enforce the confidence threshold before placing anything.
+  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+    const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
+    console.log(`${tag} skipped: ${reason}`);
+    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, confidence: parsed.confidence } });
+    return;
+  }
+
+  await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, sourceOverrides);
 }
 
 // ── Worker factory ────────────────────────────────────────────────────────────
