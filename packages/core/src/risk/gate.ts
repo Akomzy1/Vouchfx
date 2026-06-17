@@ -7,6 +7,8 @@ export interface GateInput {
   sl: number | null;
   slUnit: SlUnit;
   entryPrice: number;
+  /** Trade direction — needed to place a default SL on the correct side of entry. */
+  side: "BUY" | "SELL";
   accountBalance: number;
   settings: RiskSettings;
   spec: SymbolSpec;
@@ -105,9 +107,12 @@ export function gateAndSize(input: GateInput): GateResult {
     if (settings.defaultSlPolicy === "ask") {
       return { ok: false, reason: "no_sl:policy=ask" };
     }
-    // apply_default: convert defaultSlPips to a price distance
+    // apply_default: convert defaultSlPips to a price distance and place the
+    // stop on the correct side of entry (below for BUY, above for SELL).
     slDistancePrice = settings.defaultSlPips * 10 * spec.tickSize;
-    effectiveSl = null; // no absolute SL price — caller must compute from entry
+    effectiveSl = input.side === "SELL"
+      ? entryPrice + slDistancePrice
+      : entryPrice - slDistancePrice;
   } else {
     slDistancePrice = resolveSlDistance(sl, slUnit, entryPrice, spec);
     if (!isFinite(slDistancePrice) || slDistancePrice <= 0) {

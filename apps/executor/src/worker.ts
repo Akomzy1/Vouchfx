@@ -1013,6 +1013,7 @@ async function executeNewSignal(
     sl: effSl,
     slUnit: effSlUnit,
     entryPrice: gatePriceRef,
+    side: effSide,
     accountBalance,
     settings: riskSettings,
     spec: symbolSpec,
@@ -1031,7 +1032,11 @@ async function executeNewSignal(
   }
 
   const legVolume = gateResult.volume;
-  console.log(`${tag} risk gate passed: volume=${legVolume} dollarRisk=${gateResult.dollarRisk.toFixed(2)} balance=${accountBalance.toFixed(2)}`);
+  // The SL to PLACE: the signal's own SL if it gave one, otherwise the absolute
+  // SL the gate computed from the default-SL policy (apply_default). Using the
+  // raw signal SL alone meant no-SL signals were placed with NO stop at all.
+  const placedSl = effSl ?? gateResult.slPrice ?? undefined;
+  console.log(`${tag} risk gate passed: volume=${legVolume} sl=${placedSl ?? "none"} dollarRisk=${gateResult.dollarRisk.toFixed(2)} balance=${accountBalance.toFixed(2)}`);
 
   // ── Breakeven-after-TP1: apply to any existing eligible open legs ────────
   await applyBreakevenOpportunities(db, executor, userId, brokerConn, riskSettings, tag);
@@ -1052,7 +1057,7 @@ async function executeNewSignal(
       symbol:               parsed.symbol,
       side:                 effSide,
       volume:               legVolume,
-      sl:                   effSl ?? undefined,
+      sl:                   placedSl,
       tp:                   tp ?? undefined,
       status:               "PENDING",
     };
@@ -1078,7 +1083,7 @@ async function executeNewSignal(
       orderType,
       volume:       legVolume,
       entryPrice,
-      sl:           effSl ?? undefined,
+      sl:           placedSl,
       tp:           tp ?? undefined,
       clientOrderId: legKey,
       comment:      "VouchFX",

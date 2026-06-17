@@ -52,6 +52,7 @@ const BASE: GateInput = {
   sl:             SL,
   slUnit:         "price",
   entryPrice:     ENTRY,
+  side:           "BUY",
   accountBalance: BALANCE,
   settings:       MIRROR_SETTINGS,
   spec:           SPEC,

@@ -213,6 +213,7 @@ describe("gateAndSize", () => {
     const result = gateAndSize({
       sl: 1.0800,
       slUnit: "price",
+      side: "BUY",
       entryPrice: 1.0850,
       accountBalance: 10_000,
       settings: SETTINGS,
@@ -229,6 +230,7 @@ describe("gateAndSize", () => {
     const result = gateAndSize({
       sl: null,
       slUnit: "pips",
+      side: "BUY",
       entryPrice: 1.0850,
       accountBalance: 10_000,
       settings: { ...SETTINGS, defaultSlPolicy: "skip" },
@@ -242,6 +244,7 @@ describe("gateAndSize", () => {
     const result = gateAndSize({
       sl: null,
       slUnit: "pips",
+      side: "BUY",
       entryPrice: 1.0850,
       accountBalance: 10_000,
       settings: { ...SETTINGS, defaultSlPolicy: "ask" },
@@ -255,6 +258,7 @@ describe("gateAndSize", () => {
     const result = gateAndSize({
       sl: null,
       slUnit: "pips",
+      side: "BUY",
       entryPrice: 1.0850,
       accountBalance: 10_000,
       settings: { ...SETTINGS, defaultSlPolicy: "apply_default", defaultSlPips: 20 },
@@ -263,7 +267,9 @@ describe("gateAndSize", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.volume).toBeGreaterThan(0);
-      expect(result.slPrice).toBeNull(); // no absolute SL price when using default pips
+      // apply_default now returns an ABSOLUTE SL price: entry - 20pips (BUY).
+      // 20 * 10 * 0.00001 = 0.002 → 1.0850 - 0.002 = 1.0830.
+      expect(result.slPrice).toBeCloseTo(1.0830, 5);
     }
   });
 
@@ -271,6 +277,7 @@ describe("gateAndSize", () => {
     const result = gateAndSize({
       sl: -1,
       slUnit: "price",
+      side: "BUY",
       entryPrice: 1.0850,
       accountBalance: 10_000,
       settings: SETTINGS,
