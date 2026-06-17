@@ -1,6 +1,6 @@
 import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
-import { NewMessage } from "telegram/events";
+import { NewMessage, Raw } from "telegram/events";
 import { DeletedMessage } from "telegram/events/DeletedMessage";
 import { asReadonly, type ReadonlyTelegramClient } from "./readonly-guard";
 
@@ -101,9 +101,21 @@ export type MessageCallback = (
 export async function startListening(
   client: ReadonlyTelegramClient,
   chatIds: bigint[],
-  onMessage: MessageCallback
+  onMessage: MessageCallback,
+  // Bumped on ANY incoming update — the liveness signal for the watchdog. A
+  // zombie update loop (TIMEOUT-spinning) delivers nothing, so this goes stale
+  // even when a direct GetState probe still succeeds.
+  onActivity?: () => void
 ): Promise<void> {
   await client.connect();
+
+  // Catch-all raw update handler → activity heartbeat. Registered even with no
+  // chats so a warm-but-idle client is still detectable. Raw fires on EVERY
+  // server-pushed update, which stops entirely when the update loop zombies.
+  if (onActivity) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client.addEventHandler((() => { onActivity(); }) as any, new Raw({}) as any);
+  }
 
   if (chatIds.length === 0) {
     console.log("[listener] connected — no channels configured yet");

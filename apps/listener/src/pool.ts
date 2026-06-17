@@ -38,6 +38,8 @@ interface PoolEntry {
   client: ReadonlyTelegramClient;
   session: SessionRow;
   probeFailures: number;
+  /** Last time ANY update arrived — staleness signals a dead update loop. */
+  activity: { at: number };
 }
 
 interface SessionRow {
@@ -118,28 +120,34 @@ export class UserPool {
   }
 
   /**
-   * Liveness watchdog. GramJS connections can zombie after a network blip:
-   * the process stays up but the update loop times out forever and no
-   * messages arrive (observed in production 2026-06-12 — a signal was missed
-   * while heartbeats kept passing). Probe each client; after two consecutive
-   * failures, tear the client down and rebuild it from the stored session.
+   * Liveness watchdog. GramJS connections can zombie after a network blip: the
+   * process stays up but the update loop spins on TIMEOUT forever and delivers
+   * nothing, while a direct GetState probe STILL succeeds (different code path).
+   * So we rebuild on EITHER signal:
+   *   1. probe (GetState) fails twice consecutively, OR
+   *   2. no update has arrived for STALE_ACTIVITY_MS — the reliable zombie tell
+   *      (the catch-all activity handler stops firing when the loop is dead).
    */
   async watchdog(): Promise<void> {
+    const STALE_ACTIVITY_MS = 12 * 60_000;
     for (const entry of [...this.entries.values()]) {
-      const alive = await probeConnection(entry.client);
+      const stale = Date.now() - entry.activity.at;
+      const probeAlive = await probeConnection(entry.client);
 
-      if (alive) {
+      if (probeAlive) {
         entry.probeFailures = 0;
-        continue;
+      } else {
+        entry.probeFailures += 1;
+        console.warn(`[pool] user ${entry.userId} liveness probe failed (${entry.probeFailures} consecutive)`);
       }
 
-      entry.probeFailures += 1;
-      console.warn(
-        `[pool] user ${entry.userId} liveness probe failed (${entry.probeFailures} consecutive)`
-      );
-      if (entry.probeFailures < 2) continue;
+      const probeDead = entry.probeFailures >= 2;
+      const activityDead = stale > STALE_ACTIVITY_MS;
+      if (!probeDead && !activityDead) continue;
 
-      console.warn(`[pool] user ${entry.userId} connection is dead — rebuilding client`);
+      console.warn(
+        `[pool] user ${entry.userId} connection unhealthy (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m) — rebuilding`
+      );
       const { session, sourceMap, brokerConnectionId } = entry;
       await this.removeEntry(entry.userId);
       try {
@@ -268,6 +276,7 @@ export class UserPool {
 
     const chatIds = [...effectiveChatSourceMap.keys()].map(id => BigInt(id));
     const client = createReadonlyClient(apiId, this.env.TELEGRAM_API_HASH, sessionString);
+    const activity = { at: Date.now() };
 
     await startListening(client, chatIds, async (idempotencyKey, text, hasMedia, imageBase64) => {
       const parts = idempotencyKey.split(":");
@@ -305,7 +314,7 @@ export class UserPool {
           error: (err as Error).message,
         });
       }
-    });
+    }, () => { activity.at = Date.now(); });
 
     // Subscribe to delete events — channels/supergroups only; chats filter
     // is unreliable for regular groups (GramJS limitation, see DeletedMessage docs).
@@ -326,6 +335,7 @@ export class UserPool {
       client,
       session,
       probeFailures: 0,
+      activity,
     });
 
     await updateSessionStatus(userId, "active").catch(() => {});
