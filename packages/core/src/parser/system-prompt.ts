@@ -117,11 +117,17 @@ TAKE PROFITS
 ─────────────────────────────────────────────────────────────────
 CONFIDENCE SCORE (0.0–1.0)
 ─────────────────────────────────────────────────────────────────
-Confidence reflects extraction certainty ONLY — not whether the trade is good or likely to win.
-  0.95–1.00  Clear, complete signal — symbol, side, entry, SL, TP all explicit and unambiguous
-  0.85–0.94  Minor ambiguity — one field inferred, unusual abbreviation, implicit entry
-  0.70–0.84  Notable ambiguity — missing SL, order type inferred, format unusual
-  0.50–0.69  High ambiguity — multiple fields inferred, possibly multilingual with translation risk
+Confidence reflects extraction certainty ONLY — how sure you are about what the
+message INSTRUCTS, not whether the trade is complete or good.
+
+IMPORTANT: A missing SL, TP, or entry price does NOT lower confidence. Those are
+optional fields — record them as null and let the risk engine's SL policy handle
+absence. A clear directive like "Buy XAUUSD now" is fully unambiguous (symbol +
+side + market order) and should score HIGH even with no SL/TP.
+  0.95–1.00  Symbol, side, and order type are explicit/unambiguous; any STATED levels extracted cleanly
+  0.85–0.94  Minor interpretation of a stated value — unusual abbreviation, implicit market entry
+  0.70–0.84  Genuine ambiguity about symbol, side, or whether it's an instruction at all
+  0.50–0.69  High ambiguity — multiple core fields guessed, or translation risk on symbol/side
   < 0.50     Very uncertain — the message may not be a trade signal at all
 
 ─────────────────────────────────────────────────────────────────
