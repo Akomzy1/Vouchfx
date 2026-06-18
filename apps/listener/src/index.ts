@@ -70,36 +70,37 @@ healthServer.listen(HEALTH_PORT, () => {
   const stopHeartbeat = startHeartbeat(db, WORKER_ID, "listener", { version: env.NODE_ENV });
   const heartbeatTimer = setInterval(() => { lastHeartbeatAt = Date.now(); }, 30_000);
 
-  // sync and watchdog both mutate pool entries — never run them concurrently
+  // sync and watchdog both mutate pool entries — never run them concurrently.
   let maintenanceBusy = false;
 
-  const syncInterval = setInterval(async () => {
+  // CRITICAL: race every maintenance op against a timeout. A hung await (e.g. a
+  // Supabase query or GramJS call that never resolves) would otherwise leave
+  // the `finally` unrun, pin maintenanceBusy=true forever, and permanently kill
+  // BOTH the sync and the watchdog — exactly how the listener went silent for
+  // 14h on 2026-06-18. The timeout guarantees the flag is always released.
+  async function runMaintenance(label: string, op: () => Promise<void>, timeoutMs: number): Promise<void> {
     if (maintenanceBusy) return;
     maintenanceBusy = true;
+    let timer: NodeJS.Timeout | undefined;
     try {
-      await pool.sync();
+      await Promise.race([
+        op(),
+        new Promise<void>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs); }),
+      ]);
     } catch (err) {
-      log.error("sync error", { error: (err as Error).message });
+      log.error(`${label} error`, { error: (err as Error).message });
       captureException(err);
     } finally {
+      if (timer) clearTimeout(timer);
       maintenanceBusy = false;
     }
-  }, SYNC_INTERVAL_MS);
+  }
 
-  // Liveness watchdog: detects zombie MTProto connections (update loop stuck
-  // on TIMEOUT, no messages delivered) and rebuilds the affected client.
-  const watchdogInterval = setInterval(async () => {
-    if (maintenanceBusy) return;
-    maintenanceBusy = true;
-    try {
-      await pool.watchdog();
-    } catch (err) {
-      log.error("watchdog error", { error: (err as Error).message });
-      captureException(err);
-    } finally {
-      maintenanceBusy = false;
-    }
-  }, WATCHDOG_INTERVAL_MS);
+  const syncInterval = setInterval(() => { void runMaintenance("sync", () => pool.sync(), 25_000); }, SYNC_INTERVAL_MS);
+
+  // Liveness watchdog: rebuilds zombie/stale/aged MTProto connections so the
+  // listener can never silently stop delivering messages.
+  const watchdogInterval = setInterval(() => { void runMaintenance("watchdog", () => pool.watchdog(), 120_000); }, WATCHDOG_INTERVAL_MS);
 
   async function shutdown(): Promise<void> {
     log.info("shutting down");

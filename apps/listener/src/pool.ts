@@ -40,6 +40,8 @@ interface PoolEntry {
   probeFailures: number;
   /** Last time ANY update arrived — staleness signals a dead update loop. */
   activity: { at: number };
+  /** When this client was (re)built — used for the proactive age-based reconnect. */
+  connectedAt: number;
 }
 
 interface SessionRow {
@@ -130,8 +132,10 @@ export class UserPool {
    */
   async watchdog(): Promise<void> {
     const STALE_ACTIVITY_MS = 12 * 60_000;
+    const MAX_CONN_AGE_MS = 25 * 60_000; // proactive reconnect backstop
     for (const entry of [...this.entries.values()]) {
       const stale = Date.now() - entry.activity.at;
+      const age = Date.now() - entry.connectedAt;
       const probeAlive = await probeConnection(entry.client);
 
       if (probeAlive) {
@@ -143,10 +147,15 @@ export class UserPool {
 
       const probeDead = entry.probeFailures >= 2;
       const activityDead = stale > STALE_ACTIVITY_MS;
-      if (!probeDead && !activityDead) continue;
+      // Backstop: rebuild any connection older than MAX_CONN_AGE regardless of
+      // apparent health — guarantees no zombie survives more than ~25 min even
+      // if both probe and activity heuristics are fooled. GramJS catches up on
+      // reconnect so a brief rebuild doesn't lose messages.
+      const aged = age > MAX_CONN_AGE_MS;
+      if (!probeDead && !activityDead && !aged) continue;
 
       console.warn(
-        `[pool] user ${entry.userId} connection unhealthy (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m) — rebuilding`
+        `[pool] user ${entry.userId} rebuilding (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m, age=${Math.round(age / 60_000)}m)`
       );
       const { session, sourceMap, brokerConnectionId } = entry;
       await this.removeEntry(entry.userId);
@@ -336,6 +345,7 @@ export class UserPool {
       session,
       probeFailures: 0,
       activity,
+      connectedAt: Date.now(),
     });
 
     await updateSessionStatus(userId, "active").catch(() => {});
