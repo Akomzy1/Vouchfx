@@ -30,6 +30,7 @@ export interface RiskSettings {
   daily_loss_cap_action: LossAction;
   default_sl_policy:     SlPolicy;
   default_sl_pips:       number | null;
+  default_sl_pips_gold:  number | null;
   breakeven_after_tp1:   boolean;
   trailing_after_tp2:    boolean;
   news_filter_enabled:   boolean;
@@ -289,7 +290,8 @@ export default function RiskSettingsForm({
         daily_loss_cap_pct: s.daily_loss_cap_pct === 0 ? null : s.daily_loss_cap_pct,
         fixed_lot_size:     s.sizing_mode !== "fixed_lot" ? null : s.fixed_lot_size,
         fixed_usd_risk:     s.sizing_mode !== "fixed_usd_risk" ? null : s.fixed_usd_risk,
-        default_sl_pips:    s.default_sl_policy !== "apply_default" ? null : s.default_sl_pips,
+        default_sl_pips:      s.default_sl_policy !== "apply_default" ? null : s.default_sl_pips,
+        default_sl_pips_gold: s.default_sl_policy !== "apply_default" ? null : s.default_sl_pips_gold,
       };
       const res = await fetch("/api/risk", {
         method: "PATCH",
@@ -623,11 +625,18 @@ export default function RiskSettingsForm({
           <div className="flex flex-col gap-2.5">
             <RadioRow on={s.default_sl_policy === "apply_default"} onClick={() => set({ default_sl_policy: "apply_default" })} icon={ShieldPlus}
               label="Apply a default stop loss" desc="Attach a fixed stop at this distance so the trade is never left unprotected.">
-              <label className="flex items-center gap-2.5 text-[12px] text-text-secondary">
-                Default stop distance
-                <NumInput value={s.default_sl_pips ?? 25} min={1} max={500} step={1} suffix="pips" w="w-28"
-                  onChange={(v) => set({ default_sl_pips: v })} />
-              </label>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <label className="flex items-center gap-2.5 text-[12px] text-text-secondary">
+                  Forex / general
+                  <NumInput value={s.default_sl_pips ?? 30} min={1} max={500} step={1} suffix="pips" w="w-24"
+                    onChange={(v) => set({ default_sl_pips: v })} />
+                </label>
+                <label className="flex items-center gap-2.5 text-[12px] text-text-secondary">
+                  Gold (XAU)
+                  <NumInput value={s.default_sl_pips_gold ?? 150} min={1} max={2000} step={5} suffix="pips" w="w-24"
+                    onChange={(v) => set({ default_sl_pips_gold: v })} />
+                </label>
+              </div>
             </RadioRow>
             <RadioRow on={s.default_sl_policy === "skip"} onClick={() => set({ default_sl_policy: "skip" })} icon={SkipForward}
               label="Skip the signal" desc="Don't trade signals that arrive without a stop loss. Safest option." />

@@ -30,8 +30,10 @@ export interface RiskSettings {
   fixedLot: number;
   /** For fixed_dollar_risk: dollar amount to risk per trade. */
   fixedDollarRisk: number;
-  /** Fallback SL in pips when signal.sl is null and policy is apply_default. */
+  /** Fallback SL in pips when signal.sl is null and policy is apply_default (forex/general). */
   defaultSlPips: number;
+  /** Fallback SL in pips for GOLD/metals (XAU/XAG) — gold needs a much wider stop than forex. */
+  defaultSlPipsGold: number;
   /** What to do when a signal arrives with no stop loss. */
   defaultSlPolicy: SlPolicy;
   /** Max concurrent open trades across the account (0 = unlimited). */
@@ -66,6 +68,7 @@ export const DEFAULT_RISK_SETTINGS: Readonly<RiskSettings> = {
   fixedLot: 0.01,
   fixedDollarRisk: 10,
   defaultSlPips: 20,
+  defaultSlPipsGold: 150,
   defaultSlPolicy: "skip",
   maxTrades: 0,
   maxTradesPerDay: 0,

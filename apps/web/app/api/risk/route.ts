@@ -24,6 +24,7 @@ type PatchBody = {
   daily_loss_cap_action?: string;
   default_sl_policy?:     string;
   default_sl_pips?:       unknown;
+  default_sl_pips_gold?:  unknown;
   breakeven_after_tp1?:   unknown;
   trailing_after_tp2?:    unknown;
   execution_mode?:        string;
@@ -55,7 +56,7 @@ function validatePatch(body: PatchBody): { ok: true; data: Record<string, unknow
     if (!MIRROR_LOT_MODES.includes(body.mirror_lot_mode as never)) return { ok: false, error: "Invalid mirror_lot_mode" };
     d.mirror_lot_mode = body.mirror_lot_mode;
   }
-  for (const key of ["risk_per_trade_pct", "fixed_lot_size", "fixed_usd_risk", "daily_signal_limit", "max_trades_per_day", "daily_loss_cap_pct", "default_sl_pips"] as const) {
+  for (const key of ["risk_per_trade_pct", "fixed_lot_size", "fixed_usd_risk", "daily_signal_limit", "max_trades_per_day", "daily_loss_cap_pct", "default_sl_pips", "default_sl_pips_gold"] as const) {
     if (key in body) {
       const v = body[key];
       if (v !== null && typeof v !== "number") return { ok: false, error: `${key} must be a number or null` };
@@ -89,6 +90,7 @@ const DEFAULTS = {
   daily_loss_cap_action: "pause" as const,
   default_sl_policy:     "skip" as const,
   default_sl_pips:       null,
+  default_sl_pips_gold:  150,
   breakeven_after_tp1:   false,
   trailing_after_tp2:    false,
   execution_mode:        "apply_my_rules" as const,

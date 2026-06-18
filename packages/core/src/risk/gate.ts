@@ -9,11 +9,19 @@ export interface GateInput {
   entryPrice: number;
   /** Trade direction — needed to place a default SL on the correct side of entry. */
   side: "BUY" | "SELL";
+  /** Symbol — selects the gold vs forex default-SL distance for apply_default. */
+  symbol: string;
   accountBalance: number;
   settings: RiskSettings;
   spec: SymbolSpec;
   /** Lot size explicitly stated in the signal. Only used in mirror mode with provider_lot sub-choice. */
   providerLot?: number | null;
+}
+
+/** Gold/metals need a far wider default stop than forex (XAUUSD, XAGUSD, "GOLD"). */
+export function isGoldSymbol(symbol: string): boolean {
+  const s = symbol.toUpperCase();
+  return s.includes("XAU") || s.includes("XAG") || s.includes("GOLD");
 }
 
 export type GateResult =
@@ -107,9 +115,11 @@ export function gateAndSize(input: GateInput): GateResult {
     if (settings.defaultSlPolicy === "ask") {
       return { ok: false, reason: "no_sl:policy=ask" };
     }
-    // apply_default: convert defaultSlPips to a price distance and place the
-    // stop on the correct side of entry (below for BUY, above for SELL).
-    slDistancePrice = settings.defaultSlPips * 10 * spec.tickSize;
+    // apply_default: convert the asset-appropriate default pips to a price
+    // distance and place the stop on the correct side of entry (below for BUY,
+    // above for SELL). Gold uses its own (wider) default.
+    const defaultPips = isGoldSymbol(input.symbol) ? settings.defaultSlPipsGold : settings.defaultSlPips;
+    slDistancePrice = defaultPips * 10 * spec.tickSize;
     effectiveSl = input.side === "SELL"
       ? entryPrice + slDistancePrice
       : entryPrice - slDistancePrice;

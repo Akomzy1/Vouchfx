@@ -178,6 +178,7 @@ export interface RiskSettingsRow {
   daily_loss_cap_action: DailyLossAction;
   default_sl_policy: DefaultSlPolicy;
   default_sl_pips: number | null;
+  default_sl_pips_gold: number | null;
   breakeven_after_tp1: boolean;
   trailing_after_tp2: boolean;
   created_at: string;

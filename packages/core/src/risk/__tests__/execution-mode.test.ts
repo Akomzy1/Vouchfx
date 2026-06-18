@@ -53,6 +53,7 @@ const BASE: GateInput = {
   slUnit:         "price",
   entryPrice:     ENTRY,
   side:           "BUY",
+  symbol:         "GBPUSD",
   accountBalance: BALANCE,
   settings:       MIRROR_SETTINGS,
   spec:           SPEC,
