@@ -52,20 +52,24 @@ export interface SignalJobData {
  * Per-account BullMQ job id for a signal (multi-account fan-out, VCH-BRK-04).
  *
  * A signal copies to every copy-enabled account, so the base idempotency key
- * `${chat}:${msg}:${edit}` is suffixed with the broker connection id. This keeps
+ * `${chat}:${msg}:${edit}` is combined with the broker connection id. This keeps
  * each account's job DISTINCT (BullMQ won't dedupe them into one execution)
  * while staying idempotent PER account (same signal + same account → same id).
  * The executor scopes every trade query by broker_connection_id to match.
+ *
+ * IMPORTANT: BullMQ custom job ids cannot contain ":" (its Redis key separator),
+ * so the composite is joined with "_" — otherwise the enqueue is rejected and
+ * the signal is dropped. Still fully deterministic per (signal, account).
  */
 export function accountSignalJobId(baseKey: string, brokerConnectionId: string): string {
-  return `${baseKey}:${brokerConnectionId}`;
+  return `${baseKey}:${brokerConnectionId}`.replace(/:/g, "_");
 }
 
-/** Per-account cancel job id for a deleted message (one cancel per account). */
+/** Per-account cancel job id for a deleted message (one cancel per account). Colon-free. */
 export function accountCancelJobId(
   chatId: string,
   messageId: number,
   brokerConnectionId: string
 ): string {
-  return `${chatId}:${messageId}:cancel:${brokerConnectionId}`;
+  return `${chatId}:${messageId}:cancel:${brokerConnectionId}`.replace(/:/g, "_");
 }

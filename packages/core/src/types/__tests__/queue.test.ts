@@ -13,8 +13,9 @@ const ACC_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const ACC_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 describe("accountSignalJobId", () => {
-  it("appends the broker connection id to the base key", () => {
-    expect(accountSignalJobId(BASE, ACC_A)).toBe(`${BASE}:${ACC_A}`);
+  it("combines the base key and broker id, colon-free (BullMQ rejects ':')", () => {
+    expect(accountSignalJobId(BASE, ACC_A)).toBe(`${BASE}:${ACC_A}`.replace(/:/g, "_"));
+    expect(accountSignalJobId(BASE, ACC_A)).not.toContain(":");
   });
 
   it("is stable for the same signal + account (idempotent per account)", () => {
@@ -33,8 +34,9 @@ describe("accountSignalJobId", () => {
 });
 
 describe("accountCancelJobId", () => {
-  it("formats a per-account cancel key", () => {
-    expect(accountCancelJobId("-100123", 42, ACC_A)).toBe(`-100123:42:cancel:${ACC_A}`);
+  it("formats a per-account cancel key, colon-free", () => {
+    expect(accountCancelJobId("-100123", 42, ACC_A)).toBe(`-100123_42_cancel_${ACC_A}`);
+    expect(accountCancelJobId("-100123", 42, ACC_A)).not.toContain(":");
   });
 
   it("differs across accounts", () => {
