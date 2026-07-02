@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Send, Menu, X } from "lucide-react";
 import Mark from "./Mark";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 const TELEGRAM_URL = "https://t.me/getvouchfx";
 
@@ -11,7 +12,8 @@ const LINKS: [string, string][] = [
   ["Features", "#features"],
   ["How it works", "#how"],
   ["Pricing", "#pricing"],
-  ["Affiliates", "#affiliates"],
+  // "Affiliates" anchor returns when the referral/affiliate program is enabled.
+  ...(REFERRAL_AFFILIATE_ENABLED ? [["Affiliates", "#affiliates"] as [string, string]] : []),
 ];
 
 export default function Nav() {

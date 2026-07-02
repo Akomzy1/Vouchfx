@@ -1,9 +1,14 @@
 import { Gift, Copy } from "lucide-react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 export const metadata: Metadata = { title: "Refer & Earn" };
 
 export default function ReferralsPage() {
+  // Referral/affiliate program deferred at launch — hide the screen entirely.
+  if (!REFERRAL_AFFILIATE_ENABLED) redirect("/dashboard");
+
   return (
     <div className="space-y-6">
       <div>

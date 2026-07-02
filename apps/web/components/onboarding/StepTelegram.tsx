@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ConnectFlow from "@/components/telegram/ConnectFlow";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 interface Props {
   status: "active" | "limited" | "banned" | "disconnected" | "none";
@@ -32,8 +33,9 @@ export default function StepTelegram({ status, lastConnectedAt, alreadyReferred,
         onStatusChange={(s: string) => setCurrentStatus(s as typeof currentStatus)}
       />
 
-      {/* Optional referral code for users who got the code out-of-band */}
-      {!alreadyReferred && (
+      {/* Optional referral code for users who got the code out-of-band.
+          Hidden while the referral/affiliate program is deferred. */}
+      {REFERRAL_AFFILIATE_ENABLED && !alreadyReferred && (
         <div className="space-y-1">
           <label className="text-xs text-text-muted">Referral code (optional)</label>
           <input

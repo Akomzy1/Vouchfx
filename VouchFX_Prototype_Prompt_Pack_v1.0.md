@@ -172,6 +172,8 @@ Below: a simple invoice history table (date, plan, amount, status) with 2–3 mo
 
 ## Prompt 7b — Refer & earn (affiliate + user referral)
 
+> **Deferred for initial launch** — the referral/affiliate program is held behind the `REFERRAL_AFFILIATE_ENABLED` flag (off at launch) and its landing-page marketing is removed. This screen spec remains valid for when the program is enabled in a later phase.
+
 ```
 Using the VouchFX design language, build the VouchFX "Refer & earn" screen as a single responsive React artifact. It serves two audiences via a tab switch at the top: "Signal providers" (affiliate) and "My referrals" (user referral). Both pay 20%.
 

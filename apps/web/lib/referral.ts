@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 /** Deterministic 8-char code from the user UUID (32 hex chars → first 8 uppercased). */
 export function codeFromUserId(userId: string): string {
@@ -77,6 +78,9 @@ export async function bindReferral(
   source: ReferralSource = "referral",
   explicit = false
 ): Promise<string | null> {
+  // Program deferred at launch — no new attribution is bound. Existing
+  // referral rows are left exactly as they are.
+  if (!REFERRAL_AFFILIATE_ENABLED) return null;
   if (!referralCode) return null;
   const code = referralCode.toUpperCase();
 
@@ -139,6 +143,10 @@ export async function accrueCommission(
   grossUsd: number,
   paymentReference: string
 ): Promise<void> {
+  // Program deferred at launch — no NEW commission/credit accrues. Existing
+  // accrued balances and ledger rows are untouched. (Clawback below stays
+  // active so refunds of pre-existing accruals still reverse correctly.)
+  if (!REFERRAL_AFFILIATE_ENABLED) return;
   if (!paymentReference || !(grossUsd > 0)) return;
   await db.rpc("fn_accrue_commission", {
     p_payment_reference: paymentReference,

@@ -72,6 +72,19 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().url().optional(),
   // Comma-separated admin email addresses (e.g. "alice@example.com,bob@example.com")
   ADMIN_EMAILS: z.string().optional(),
+
+  // Referral & affiliate program master switch (PRD §6.11). DEFERRED at launch —
+  // default OFF. When false: the "Refer & earn" UI is hidden, the /r/ and /ref/
+  // links are inert (no attribution cookie, no bind), and commission/credit
+  // accrual is a no-op. Existing accrued balances, payouts, ledger rows, and
+  // captured attribution are preserved untouched — flip to true to re-enable.
+  // The web app reads NEXT_PUBLIC_REFERRAL_AFFILIATE_ENABLED (client-visible);
+  // keep both in sync. This server copy is for non-web workers.
+  // NB: only the exact string "true"/"1" enables it — anything else is off.
+  REFERRAL_AFFILIATE_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
 });
 
 export type Env = z.infer<typeof envSchema>;

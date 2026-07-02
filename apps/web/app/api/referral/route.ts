@@ -2,11 +2,15 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { ensureAffiliateAccount } from "@/lib/referral";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://vouchfx.com";
 const PAYOUT_MINIMUM_USD = 50;
 
 export async function GET() {
+  // Affiliate dashboard data — program deferred at launch, route not found.
+  if (!REFERRAL_AFFILIATE_ENABLED) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

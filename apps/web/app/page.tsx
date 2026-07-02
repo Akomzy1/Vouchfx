@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import Nav from "@/components/marketing/Nav";
 import Mark from "@/components/marketing/Mark";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 export const revalidate = 3600;
 
@@ -525,6 +526,9 @@ export default function LandingPage() {
         </section>
 
         {/* ── Affiliate / referral band ─────────────────────────────────── */}
+        {/* Hidden while the referral/affiliate program is deferred at launch;
+            returns automatically when REFERRAL_AFFILIATE_ENABLED is set. */}
+        {REFERRAL_AFFILIATE_ENABLED && (
         <section id="affiliates" className="scroll-mt-20 border-t border-border bg-bg">
           <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:py-24">
             <div className="flex flex-col items-center text-center">
@@ -575,6 +579,7 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+        )}
 
         {/* ── Community strip ───────────────────────────────────────────── */}
         <section className="border-t border-border bg-bg">
@@ -624,7 +629,7 @@ export default function LandingPage() {
             </div>
 
             {([
-              ["Product", [["Features", "#features"], ["How it works", "#how"], ["Pricing", "#pricing"], ["Affiliates", "#affiliates"], ["Audit log", "#"]]],
+              ["Product", [["Features", "#features"], ["How it works", "#how"], ["Pricing", "#pricing"], ...(REFERRAL_AFFILIATE_ENABLED ? [["Affiliates", "#affiliates"]] as [string, string][] : []), ["Audit log", "#"]]],
               ["Company", [["About", "#"], ["Support", "#"], ["Status", "#"], ["Contact", "#"]]],
               ["Legal", [["Terms", "#"], ["Privacy", "#"], ["Risk disclosure", "#"]]],
             ] as [string, [string, string][]][]).map(([title, items]) => (

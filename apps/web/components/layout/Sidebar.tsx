@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Send,
   Zap,
+  BarChart3,
   SlidersHorizontal,
   Target,
   CreditCard,
@@ -20,15 +21,20 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { signOut } from "@/lib/auth/actions";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/channels", label: "Channels", icon: Send },
   { href: "/signals", label: "Signals", icon: Zap },
+  { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/risk", label: "Risk", icon: SlidersHorizontal },
   { href: "/prop", label: "Prop Mode", icon: Target },
   { href: "/billing", label: "Billing", icon: CreditCard },
-  { href: "/refer", label: "Refer & earn", icon: Gift },
+  // "Refer & earn" is shown only when the referral/affiliate program is enabled.
+  ...(REFERRAL_AFFILIATE_ENABLED
+    ? [{ href: "/refer", label: "Refer & earn", icon: Gift }]
+    : []),
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

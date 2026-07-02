@@ -4,6 +4,7 @@ import { ensureAffiliateAccount } from "@/lib/referral";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import ReferTabs from "@/components/refer/ReferTabs";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 export const metadata: Metadata = { title: "Refer & Earn" };
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://vouchfx.com";
 const PAYOUT_MINIMUM_USD = 50;
 
 export default async function ReferPage() {
+  // Referral/affiliate program deferred at launch — hide the screen entirely.
+  if (!REFERRAL_AFFILIATE_ENABLED) redirect("/dashboard");
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");

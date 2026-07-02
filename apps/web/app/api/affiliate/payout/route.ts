@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 const PAYOUT_MINIMUM_USD = 50;
 const VALID_METHODS = ["stripe", "paystack", "bank_transfer"] as const;
 type PayoutMethod = (typeof VALID_METHODS)[number];
 
 export async function POST(request: Request) {
+  // Affiliate payout requests — program deferred at launch, route not found.
+  // (Existing balances/payout rows are untouched; admins settle them manually.)
+  if (!REFERRAL_AFFILIATE_ENABLED) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const db = await createClient();
   const { data: { user } } = await db.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

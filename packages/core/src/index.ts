@@ -8,6 +8,8 @@ export { applyStealth, DEFAULT_STEALTH_CONFIG } from "./executor/stealth";
 export type { StealthConfig, StealthInput, StealthOutput } from "./executor/stealth";
 export * from "./crypto/session";
 export * from "./risk";
+// Performance analytics — pure metric formulas (no I/O), safe for the web bundle.
+export * from "./performance";
 export * from "./notifications";
 export * from "./billing";
 export * from "./logger";

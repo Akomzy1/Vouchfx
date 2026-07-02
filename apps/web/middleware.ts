@@ -1,11 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { REFERRAL_AFFILIATE_ENABLED } from "@/lib/flags";
 
 // Routes that require authentication
 const PROTECTED = new Set([
   "/dashboard",
   "/channels",
   "/signals",
+  "/performance",
   "/risk",
   "/billing",
   "/refer",
@@ -65,8 +67,9 @@ export async function middleware(request: NextRequest) {
   // Legacy ?ref=CODE capture → referral (credit) program, 60-day window
   // (VCH-REF-03). The /r/CODE and /ref/CODE routes are the canonical link types;
   // this keeps older ?ref= links working and stores the unified "source:code".
+  // Skipped entirely while the referral/affiliate program is deferred.
   const ref = request.nextUrl.searchParams.get("ref");
-  if (ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) {
+  if (REFERRAL_AFFILIATE_ENABLED && ref && /^[A-Za-z0-9]{4,16}$/.test(ref)) {
     supabaseResponse.cookies.set("vouchfx_ref", `referral:${ref.toUpperCase()}`, {
       httpOnly: true,
       path: "/",

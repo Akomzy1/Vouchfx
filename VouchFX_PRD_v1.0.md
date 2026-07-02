@@ -238,6 +238,8 @@ Note: web push shares the `VCH-NOT-01` event model and toggles — it is a third
 
 ### 6.11 Referral & affiliate
 
+> **Launch status: DEFERRED to a later phase — disabled behind the `REFERRAL_AFFILIATE_ENABLED` flag (default off).** The system is built but is not part of the initial public launch: the "Refer & earn" UI, the `/r/` and `/ref/` links, the onboarding referral-code field, and all commission/credit accrual are hidden/disabled, and the affiliate marketing is removed from the landing page. Existing code, schema, and any captured data are preserved intact for re-enabling later by flipping the flag. The model below is the finalised spec for when it returns.
+
 Two distinct programs, two link types, but **one earner per subscriber**. **Provider affiliate** (signal-channel owners) earns **cash**; **user referral** (any user refers a friend) earns **account credit**. Both are clean under the execution-tool model (VouchFX pays for referrals; it does not rank, vouch for, or recommend any provider).
 
 **Core principle — unified one-slot attribution.** Every user carries exactly ONE attribution record `{ source_type (affiliate|referral), source_id, captured_at, locked }`. No matter how many links touch a user, only one source ever earns on that user — this is what structurally prevents double-payout (e.g. an affiliate's link and a friend's referral link both touching one signup must never pay 40% on one subscription). A person CAN hold both an affiliate and a referral link and earn from both — but only across *different* customers, never twice on the same one.
@@ -303,6 +305,20 @@ A single role-gated admin area for VouchFX operations — consolidating what wer
 | VCH-ADMIN-07 | Subscription actions: view invoices and, where the processor allows, trigger a refund/cancel (Stripe/Paystack) with the action logged | S | An admin can action a refund/cancel for a user; the action and processor result are logged |
 
 Note: automated payout disbursement (Stripe/Paystack/Wise/crypto Transfers) is **deferred** — payouts are actioned manually by an admin at low volume (VCH-REF-05's monthly cycle). The admin console makes manual payouts safe and auditable; automation is added when volume justifies it.
+
+### 6.15 Performance & calendar analytics
+
+A TradeZella-style performance surface built from data VouchFX already has (every executed trade with its outcome AND its source channel). Differentiator vs journaling tools: **per-channel attribution** — the user sees which providers make or lose them money, turning analytics into follow/unfollow decisions. All figures compute from closed trades on the user's connected account(s); demo and live shown separately (per the account badge).
+
+| ID | Requirement | Priority | Acceptance criteria |
+|---|---|---|---|
+| VCH-PERF-01 | Monthly P&L calendar: a month grid where each trading day shows net realised P&L (green/red/neutral), number of trades, and day win rate; a monthly stats header (month net P&L, trading days); month navigation | C | Each day cell shows that day's net P&L, trade count, and win %; the month header totals match the sum of days |
+| VCH-PERF-02 | Day drill-down: tapping a day lists that day's trades (symbol, side, lots, entry/exit, P&L, source channel), linking to each trade's audit detail | C | A day's trade list reconciles exactly with its cell figures; each row links to the existing signal/trade detail view |
+| VCH-PERF-03 | Metrics panel: total net P&L, cumulative daily net P&L (equity curve), trade win % , day win % (green days ÷ trading days), average winning trade vs average losing trade, profit factor (gross profit ÷ gross loss), total trades, avg trades/day — over a selectable range (this month / 30d / 90d / all) | C | Every metric matches a hand-computed value from the same trade set; range selector recomputes all |
+| VCH-PERF-04 | Per-channel performance table (the VouchFX differentiator): for each followed channel — net P&L, trade win %, trades, avg win/loss, profit factor — sortable, over the selected range; surfaced with a gentle nudge toward the channel toggle (e.g. "Scalp Kings: −$198 over 90d") without VouchFX recommending any provider | C | Channel rows reconcile with the trades attributed to each channel; sorting works; no advisory language — figures only |
+| VCH-PERF-05 | Computation integrity: metrics computed from closed trades only (floating P&L shown separately, never mixed into realised stats); timezone-correct day bucketing using the user's display timezone; multi-account users see per-account and combined views with demo/live never merged | C | A trade closing at 23:59 vs 00:01 user-time lands in the correct day; realised vs floating never mix; demo and live totals are separate |
+
+Placement: a "Performance" item in the main nav (alongside Dashboard/Channels/Signals). Phase: **post-MVP (C)** — a retention feature built once real trade volume exists; the underlying data (trades, outcomes, channel attribution) is already captured from Phase 1, so this is a read-only analytics layer requiring no new data collection.
 
 ---
 
@@ -405,7 +421,7 @@ Notes: Starter uses regular-reliability MetaApi; Pro/Funded use high-reliability
 |---|---|---|
 | **Phase 0 — Spike** | Single-user vertical slice: Telethon → Claude parse → MetaApi MT5 execute → minimal dashboard | 50 consecutive signals across 5 live channel formats executed correctly; e2e < 2s |
 | **Phase 1 — Closed beta (MVP)** | All **M** requirements; Supabase multi-tenancy + RLS; Fly.io listener-per-user; queue; audit log; risk settings; Paystack | 30-day beta with 20 users: missed ≤1/user/week; double-exec 0; NPS > 40 |
-| **Phase 2 — Public launch** | **S** requirements; vision parsing hardening; Stripe (global) + Stripe Tax; prop-firm features; **Prop Mode rule engine (§6.12), MT5-only**; Lifetime SKU; affiliate program. *Multi-platform deferred to Phase 3 — Prop Mode in this phase reaches MT5-based prop firms only.* | 1,000 paying users; stable COGS |
+| **Phase 2 — Public launch** | **S** requirements; vision parsing hardening; Stripe (global) + Stripe Tax; prop-firm features; **Prop Mode rule engine (§6.12), MT5-only**; Lifetime SKU; **referral/affiliate program enabled here (built already, held behind the `REFERRAL_AFFILIATE_ENABLED` flag until this phase)**. *Multi-platform deferred to Phase 3 — Prop Mode in this phase reaches MT5-based prop firms only.* | 1,000 paying users; stable COGS |
 | **Phase 3 — Platforms & margin** | **Multi-platform: cTrader Open API, DXTrade, TradeLocker, Deriv** (new Executor implementations behind the existing interface) — extends Prop Mode to non-MT5 firms; self-hosted MT5-on-Wine failover; MetaApi B2B rate | Multi-platform live; blended Starter COGS < $5/mo; gross margin > 70% |
 
 MVP = Phase 1 = all **M**-priority requirements above.
