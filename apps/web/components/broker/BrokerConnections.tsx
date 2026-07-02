@@ -100,7 +100,15 @@ function ConnectionCard({
     if (!confirm(`Remove "${conn.label ?? "this account"}"? This cannot be undone.`)) return;
     setRemoving(true);
     try {
-      await fetch(`/api/broker/${conn.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/broker/${conn.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        // Surface the failure — removing the card anyway made a failed delete
+        // look successful until the next refresh brought the row back.
+        const json = await res.json().catch(() => null);
+        alert(`Could not remove account: ${json?.error ?? `server error (${res.status})`}`);
+        setRemoving(false);
+        return;
+      }
       onRemove(conn.id);
     } catch {
       setRemoving(false);
