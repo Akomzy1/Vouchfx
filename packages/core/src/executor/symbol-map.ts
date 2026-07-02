@@ -35,3 +35,51 @@ export const SYMBOL_VARIANTS: Readonly<Record<string, readonly string[]>> = {
   SOLUSD: ["SOLUSD", "SOL/USD"],
   XRPUSD: ["XRPUSD", "XRP/USD"],
 };
+
+/** Upper-case and drop separators so "XAUUSD.c" and "XAUUSD" compare equal. */
+function normalizeSymbol(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// Broker suffix tokens appended to a base symbol (account-type / feed variants).
+// Stripped only ONE token from the END, so EURUSD→EURUSDT is NOT mistaken for
+// EURUSD (T is not a known suffix); XAUUSD.c → XAUUSDC → XAUUSD (C is).
+const BROKER_SUFFIX_RE = /(MICRO|MINI|CASH|SPOT|SPREAD|ECN|PRO|RAW|STD|PLUS)$|([MCISRZ])$/;
+
+function stripBrokerSuffix(n: string): string {
+  return n.replace(BROKER_SUFFIX_RE, "");
+}
+
+/**
+ * Generic broker-symbol resolver (VCH-BRK-03 gold/suffix auto-detection).
+ *
+ * Given a canonical symbol, its known variants, and the broker's FULL symbol
+ * list, find the broker's actual symbol — handling arbitrary suffix/format
+ * differences (XAUUSD.c, XAUUSDmicro, GOLD., XAUUSD_i, …) the static list can't
+ * enumerate. Conservative to avoid false matches: exact normalized match first,
+ * then "base + one known suffix" (shortest wins). Returns null if nothing fits.
+ */
+export function resolveBrokerSymbol(
+  raw: string,
+  variants: readonly string[],
+  brokerSymbols: readonly string[]
+): string | null {
+  const bases = Array.from(new Set([raw, ...variants].map(normalizeSymbol)));
+  const list = brokerSymbols.map((s) => ({ raw: s, n: normalizeSymbol(s) }));
+
+  // 1. Exact normalized match to the canonical or a known variant.
+  for (const base of bases) {
+    const hit = list.find((x) => x.n === base);
+    if (hit) return hit.raw;
+  }
+  // 2. Broker symbol == base + one known suffix token (prefer the shortest,
+  //    i.e. the plainest variant).
+  let best: { raw: string; n: string } | null = null;
+  for (const x of list) {
+    const stripped = stripBrokerSuffix(x.n);
+    if (stripped !== x.n && bases.includes(stripped)) {
+      if (!best || x.n.length < best.n.length) best = x;
+    }
+  }
+  return best ? best.raw : null;
+}

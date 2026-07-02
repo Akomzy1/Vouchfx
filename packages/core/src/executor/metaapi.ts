@@ -40,7 +40,7 @@ import type {
 } from "../types/executor";
 
 import { createHash } from "node:crypto";
-import { SYMBOL_VARIANTS } from "./symbol-map";
+import { SYMBOL_VARIANTS, resolveBrokerSymbol } from "./symbol-map";
 
 /**
  * MetaApi clientId must match the pattern TE_<symbol>_<id> — verified
@@ -194,6 +194,28 @@ export class MetaApiExecutor implements Executor {
         // not available on this broker — try next
       }
     }
+
+    // Fallback (VCH-BRK-03): the static list didn't match, so scan the broker's
+    // FULL symbol list for a suffix/format variant (e.g. XAUUSD.c, XAUUSDmicro,
+    // GOLD.). This is how gold/metals with broker-specific suffixes resolve.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const all = (await (connection as any).getSymbols()) as string[] | undefined;
+      if (Array.isArray(all) && all.length > 0) {
+        const match = resolveBrokerSymbol(raw, variants, all);
+        if (match) {
+          try {
+            await connection.getSymbolSpecification(match);
+            return match;
+          } catch {
+            // matched by name but spec fetch failed — fall through to null
+          }
+        }
+      }
+    } catch {
+      // getSymbols unsupported on this account/plan — nothing more we can do
+    }
+
     return null;
   }
 
