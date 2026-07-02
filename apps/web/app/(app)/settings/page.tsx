@@ -27,7 +27,7 @@ export default async function SettingsPage() {
     db.from("users").select("full_name").eq("id", user.id).single(),
     db
       .from("broker_connections")
-      .select("id, label, platform, is_active, status, account_mode, server_hint, last_status_at, created_at")
+      .select("id, label, platform, is_active, is_primary, copy_enabled, status, account_mode, server_hint, last_status_at, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     db

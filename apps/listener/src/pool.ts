@@ -14,7 +14,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import type { Queue } from "bullmq";
-import { decryptSession, type SignalJobData } from "@vouchfx/core";
+import { decryptSession, accountSignalJobId, accountCancelJobId, type SignalJobData } from "@vouchfx/core";
 import { parseEnv } from "@vouchfx/config";
 import { createReadonlyClient, probeConnection, startListening, subscribeDeletes } from "./listener";
 import type { ReadonlyTelegramClient } from "./readonly-guard";
@@ -24,6 +24,13 @@ import { alertEnqueueFailure } from "./ops-alert";
 const SPIKE_SOURCE_ID = "00000000-0000-0000-0000-000000000002";
 const SPIKE_BROKER_ID = "00000000-0000-0000-0000-000000000001";
 
+/** Order-insensitive equality for two id lists (fan-out change detection). */
+function sameIds(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
 // ─── Internal types ──────────────────────────────────────────────────────────
 
 interface PoolEntry {
@@ -32,7 +39,8 @@ interface PoolEntry {
   chatIds: Set<string>;
   /** chatId.toString() → signal_sources.id, looked up once at connect time. */
   sourceMap: Map<string, string>;
-  brokerConnectionId: string;
+  /** Copy-enabled active accounts a signal fans out to (VCH-BRK-04). */
+  brokerConnectionIds: string[];
   disconnect: () => Promise<void>;
   /** For the watchdog: probe target + what's needed to rebuild the client. */
   client: ReadonlyTelegramClient;
@@ -77,7 +85,7 @@ export class UserPool {
     }
     const [sourceMap, brokerMap] = await this.fetchUserData(sessions.map(s => s.userId));
     for (const s of sessions) {
-      await this.addEntry(s, sourceMap.get(s.userId) ?? new Map(), brokerMap.get(s.userId) ?? SPIKE_BROKER_ID);
+      await this.addEntry(s, sourceMap.get(s.userId) ?? new Map(), brokerMap.get(s.userId) ?? [SPIKE_BROKER_ID]);
     }
     console.log(`[pool] started — ${this.entries.size} user(s) active`);
   }
@@ -106,16 +114,24 @@ export class UserPool {
       const existing = this.entries.get(s.userId);
       const newChatIds = sourceMap.get(s.userId) ?? new Map<string, string>();
 
+      const newBrokerIds = brokerMap.get(s.userId) ?? [SPIKE_BROKER_ID];
+
       if (!existing) {
-        await this.addEntry(s, newChatIds, brokerMap.get(s.userId) ?? SPIKE_BROKER_ID);
+        await this.addEntry(s, newChatIds, newBrokerIds);
       } else {
-        const changed =
+        const sourcesChanged =
           newChatIds.size !== existing.chatIds.size ||
           [...newChatIds.keys()].some(id => !existing.chatIds.has(id));
-        if (changed) {
+        if (sourcesChanged) {
+          // Subscribed channels changed → rebuild the Telegram client.
           console.log(`[pool] user ${s.userId} sources changed — reconnecting`);
           await this.removeEntry(s.userId);
-          await this.addEntry(s, newChatIds, brokerMap.get(s.userId) ?? SPIKE_BROKER_ID);
+          await this.addEntry(s, newChatIds, newBrokerIds);
+        } else if (!sameIds(existing.brokerConnectionIds, newBrokerIds)) {
+          // Only the copy-enabled account set changed → update the fan-out list
+          // in place (the enqueue closures read it live); no reconnect needed.
+          console.log(`[pool] user ${s.userId} copy accounts changed → ${newBrokerIds.length} account(s)`);
+          existing.brokerConnectionIds = newBrokerIds;
         }
       }
     }
@@ -157,10 +173,10 @@ export class UserPool {
       console.warn(
         `[pool] user ${entry.userId} rebuilding (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m, age=${Math.round(age / 60_000)}m)`
       );
-      const { session, sourceMap, brokerConnectionId } = entry;
+      const { session, sourceMap, brokerConnectionIds } = entry;
       await this.removeEntry(entry.userId);
       try {
-        await this.addEntry(session, sourceMap, brokerConnectionId);
+        await this.addEntry(session, sourceMap, brokerConnectionIds);
         console.log(`[pool] user ${entry.userId} client rebuilt after dead connection`);
       } catch (err) {
         // Next watchdog/sync tick retries; sessions stay in DB.
@@ -208,13 +224,16 @@ export class UserPool {
    *
    * Returns:
    *   sourceMap: userId → Map<chatId.toString(), sourceUUID>
-   *   brokerMap: userId → first active brokerConnectionId
+   *   brokerMap: userId → copy-enabled active brokerConnectionIds (fan-out list).
+   *              A user with active accounts but NONE copy-enabled maps to []
+   *              (→ no jobs); a user with no active accounts is absent (→ the
+   *              caller's spike fallback applies).
    */
   private async fetchUserData(
     userIds: string[]
-  ): Promise<[Map<string, Map<string, string>>, Map<string, string>]> {
+  ): Promise<[Map<string, Map<string, string>>, Map<string, string[]>]> {
     const sourceMap = new Map<string, Map<string, string>>();
-    const brokerMap = new Map<string, string>();
+    const brokerMap = new Map<string, string[]>();
 
     if (userIds.length === 0) return [sourceMap, brokerMap];
 
@@ -226,11 +245,11 @@ export class UserPool {
         .in("user_id", userIds)
         .eq("is_enabled", true),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      // Order so the primary account wins; oldest active is the deterministic
-      // fallback when no row is flagged. brokerMap keeps the first per user.
+      // Every ACTIVE account with its copy_enabled flag. Ordered primary-first
+      // then oldest so the fan-out list is deterministic.
       (this.db as any)
         .from("broker_connections")
-        .select("user_id, id, is_primary, created_at")
+        .select("user_id, id, is_primary, created_at, copy_enabled")
         .in("user_id", userIds)
         .eq("is_active", true)
         .order("is_primary", { ascending: false })
@@ -246,9 +265,11 @@ export class UserPool {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const row of (brokersRes.data ?? []) as any[]) {
-      if (!brokerMap.has(row.user_id as string)) {
-        brokerMap.set(row.user_id as string, row.id as string);
-      }
+      const uid = row.user_id as string;
+      // Presence in the map marks "has an active account"; the array holds only
+      // the copy-enabled ones a signal fans out to.
+      if (!brokerMap.has(uid)) brokerMap.set(uid, []);
+      if (row.copy_enabled) brokerMap.get(uid)!.push(row.id as string);
     }
 
     return [sourceMap, brokerMap];
@@ -259,7 +280,7 @@ export class UserPool {
   private async addEntry(
     session: SessionRow,
     chatSourceMap: Map<string, string>, // chatId.toString() → sourceId
-    brokerConnectionId: string
+    brokerConnectionIds: string[]       // copy-enabled accounts to fan out to
   ): Promise<void> {
     const { userId, sessionEncrypted, apiId } = session;
 
@@ -295,33 +316,42 @@ export class UserPool {
 
       const sourceId = effectiveChatSourceMap.get(chatId) ?? SPIKE_SOURCE_ID;
 
-      const jobData: SignalJobData = {
-        jobType: "signal",
-        idempotencyKey,
-        chatId,
-        messageId,
-        editVersion,
-        text,
-        hasMedia,
-        imageBase64,
-        sourceId,
-        userId,
-        brokerConnectionId,
-      };
+      // Fan out to every copy-enabled account. Read the LIVE list off the entry
+      // so a sync() copy-toggle takes effect without reconnecting the client.
+      // Each job gets its OWN idempotency key (base key + broker id) so BullMQ
+      // doesn't dedupe the accounts into a single execution; the executor scopes
+      // all trade matching by that account.
+      const fanoutIds = this.entries.get(userId)?.brokerConnectionIds ?? brokerConnectionIds;
+      for (const brokerConnectionId of fanoutIds) {
+        const accountKey = accountSignalJobId(idempotencyKey, brokerConnectionId);
+        const jobData: SignalJobData = {
+          jobType: "signal",
+          idempotencyKey: accountKey,
+          chatId,
+          messageId,
+          editVersion,
+          text,
+          hasMedia,
+          imageBase64,
+          sourceId,
+          userId,
+          brokerConnectionId,
+        };
 
-      try {
-        await this.queue.add("signal", jobData, {
-          jobId: idempotencyKey,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 2000 },
-        });
-        console.log(`[pool] user=${userId} enqueued job=${idempotencyKey}`);
-      } catch (err) {
-        // A received signal that can't be queued is a dropped signal — alert ops.
-        await alertEnqueueFailure(this.db, this.env, {
-          idempotencyKey,
-          error: (err as Error).message,
-        });
+        try {
+          await this.queue.add("signal", jobData, {
+            jobId: accountKey,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 2000 },
+          });
+          console.log(`[pool] user=${userId} enqueued job=${accountKey}`);
+        } catch (err) {
+          // A received signal that can't be queued is a dropped signal — alert ops.
+          await alertEnqueueFailure(this.db, this.env, {
+            idempotencyKey: accountKey,
+            error: (err as Error).message,
+          });
+        }
       }
     }, () => { activity.at = Date.now(); });
 
@@ -330,8 +360,12 @@ export class UserPool {
     subscribeDeletes(client, chatIds, async (chatId, messageIds) => {
       const chatIdStr = chatId.toString();
       const sourceId = effectiveChatSourceMap.get(chatIdStr) ?? SPIKE_SOURCE_ID;
+      const fanoutIds = this.entries.get(userId)?.brokerConnectionIds ?? brokerConnectionIds;
       for (const msgId of messageIds) {
-        await this.handleDeletedMessage(userId, chatIdStr, msgId, sourceId, brokerConnectionId);
+        // A deletion cancels the pending order on EACH copy-enabled account.
+        for (const brokerConnectionId of fanoutIds) {
+          await this.handleDeletedMessage(userId, chatIdStr, msgId, sourceId, brokerConnectionId);
+        }
       }
     });
 
@@ -339,7 +373,7 @@ export class UserPool {
       userId,
       chatIds: new Set(effectiveChatSourceMap.keys()),
       sourceMap: effectiveChatSourceMap,
-      brokerConnectionId,
+      brokerConnectionIds,
       disconnect: () => client.disconnect(),
       client,
       session,
@@ -380,20 +414,23 @@ export class UserPool {
 
     const parsedSignalId = (ps as { id: string }).id;
 
-    // Only cancel if there is a PENDING (unfilled) order — not OPEN positions
+    // Only cancel if THIS account has a PENDING (unfilled) order — not OPEN
+    // positions, and not another account's trade.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: pending } = await (this.db as any)
       .from("trades")
       .select("id")
       .eq("parsed_signal_id", parsedSignalId)
+      .eq("broker_connection_id", brokerConnectionId)
       .eq("status", "PENDING");
 
     if (!pending || (pending as unknown[]).length === 0) {
-      console.log(`[pool] delete msg=${messageId} — no PENDING trades, skipping cancel`);
+      console.log(`[pool] delete msg=${messageId} — no PENDING trades on this account, skipping cancel`);
       return;
     }
 
-    const idempotencyKey = `${chatId}:${messageId}:cancel`;
+    // Per-account cancel key so each account's cancel is a distinct job.
+    const idempotencyKey = accountCancelJobId(chatId, messageId, brokerConnectionId);
     const jobData: SignalJobData = {
       jobType: "cancel",
       idempotencyKey,

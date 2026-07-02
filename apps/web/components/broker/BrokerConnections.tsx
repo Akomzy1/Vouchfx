@@ -11,8 +11,10 @@ export interface BrokerConnectionRow {
   label: string | null;
   platform: string;
   is_active: boolean;
-  /** The account new signals route to. At most one per user. */
+  /** The account shown on the dashboard. At most one per user. */
   is_primary: boolean;
+  /** Whether new signals copy to this account (VCH-BRK-04 multi-account). */
+  copy_enabled: boolean;
   status: "deploying" | "connected" | "disconnected" | "error";
   /** demo | live — from MetaApi account info; null until first sync. */
   account_mode: "demo" | "live" | null;
@@ -49,15 +51,32 @@ function ConnectionCard({
   multiple,
   onRemove,
   onMakePrimary,
+  onToggleCopy,
 }: {
   conn: BrokerConnectionRow;
   multiple: boolean;
   onRemove: (id: string) => void;
   onMakePrimary: (id: string) => Promise<void>;
+  onToggleCopy: (id: string, enabled: boolean) => Promise<void>;
 }) {
   const [status, setStatus] = useState(conn.status);
   const [removing, setRemoving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [copyEnabled, setCopyEnabled] = useState(conn.copy_enabled);
+  const [togglingCopy, setTogglingCopy] = useState(false);
+
+  async function handleToggleCopy() {
+    const next = !copyEnabled;
+    setCopyEnabled(next); // optimistic
+    setTogglingCopy(true);
+    try {
+      await onToggleCopy(conn.id, next);
+    } catch {
+      setCopyEnabled(!next); // revert on failure
+    } finally {
+      setTogglingCopy(false);
+    }
+  }
 
   // Poll for status while deploying
   useEffect(() => {
@@ -135,6 +154,22 @@ function ConnectionCard({
         </div>
       </div>
       <div className="ml-3 flex shrink-0 items-center gap-3">
+        {/* Copy-signals toggle (VCH-BRK-04): a signal copies to every enabled account. */}
+        <button
+          onClick={handleToggleCopy}
+          disabled={togglingCopy || status === "deploying"}
+          className="flex items-center gap-1.5 disabled:opacity-40"
+          title={copyEnabled ? "Signals copy to this account" : "Signals do NOT copy to this account"}
+          aria-pressed={copyEnabled}
+          aria-label="Copy signals to this account"
+        >
+          <span className={`relative h-4 w-7 rounded-full transition-colors ${copyEnabled ? "bg-primary" : "bg-border"}`}>
+            <span
+              className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${copyEnabled ? "translate-x-[15px]" : "translate-x-0.5"}`}
+            />
+          </span>
+          <span className="hidden text-xs font-medium text-text-secondary sm:inline">Copy</span>
+        </button>
         {canMakePrimary && (
           <button
             onClick={handleMakePrimary}
@@ -357,6 +392,16 @@ export default function BrokerConnections({ initialConnections }: BrokerConnecti
     setConnections(prev => prev.map(c => ({ ...c, is_primary: c.id === id })));
   }, []);
 
+  const handleToggleCopy = useCallback(async (id: string, enabled: boolean) => {
+    const res = await fetch(`/api/broker/${id}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error("toggle failed"); // card reverts its optimistic state
+    setConnections(prev => prev.map(c => (c.id === id ? { ...c, copy_enabled: enabled } : c)));
+  }, []);
+
   return (
     <div className="space-y-3">
       {/* Connected accounts list */}
@@ -369,6 +414,7 @@ export default function BrokerConnections({ initialConnections }: BrokerConnecti
               multiple={connections.length > 1}
               onRemove={handleRemove}
               onMakePrimary={handleMakePrimary}
+              onToggleCopy={handleToggleCopy}
             />
           ))}
         </div>

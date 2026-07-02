@@ -22,7 +22,7 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from("broker_connections")
-    .select("id, label, platform, is_active, is_primary, status, account_mode, server_hint, last_status_at, created_at")
+    .select("id, label, platform, is_active, is_primary, copy_enabled, status, account_mode, server_hint, last_status_at, created_at")
     .eq("user_id", user.id)
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: false });
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       status: "deploying",
       server_hint: server,
     })
-    .select("id, label, platform, is_active, is_primary, status, server_hint, created_at")
+    .select("id, label, platform, is_active, is_primary, copy_enabled, status, account_mode, server_hint, created_at")
     .single();
 
   if (dbErr) {

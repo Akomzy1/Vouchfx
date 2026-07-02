@@ -104,11 +104,14 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
-/** Look up active trade legs via a follow-up reference to the originating message. */
+/** Look up active trade legs via a follow-up reference to the originating message.
+ *  Scoped to ONE account (broker_connection_id) so multi-account follow-ups only
+ *  touch the trades on the account this job is for. */
 async function findActiveTrades(
   db: TypedClient,
   sourceId: string,
-  priorMessageId: number
+  priorMessageId: number,
+  brokerConnectionId: string
 ): Promise<TradeRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: origPs } = await (db as any)
@@ -119,19 +122,21 @@ async function findActiveTrades(
     .maybeSingle();
 
   if (!origPs) return [];
-  return findActiveTradesBySignalId(db, (origPs as { id: string }).id);
+  return findActiveTradesBySignalId(db, (origPs as { id: string }).id, brokerConnectionId);
 }
 
-/** Look up active trade legs directly by parsed_signal_id — used by cancel jobs. */
+/** Look up active trade legs by parsed_signal_id on ONE account — used by cancel jobs. */
 async function findActiveTradesBySignalId(
   db: TypedClient,
-  parsedSignalId: string
+  parsedSignalId: string,
+  brokerConnectionId: string
 ): Promise<TradeRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (db as any)
     .from("trades")
     .select("*")
     .eq("parsed_signal_id", parsedSignalId)
+    .eq("broker_connection_id", brokerConnectionId)
     .in("status", ["PENDING", "OPEN"]);
   return (data ?? []) as TradeRow[];
 }
@@ -139,12 +144,13 @@ async function findActiveTradesBySignalId(
 /**
  * Fallback for free-text follow-ups (e.g., "close XAUUSD", "scrap it"):
  * when the model sets references_prior_trade but has no message_id reference,
- * match by user_id + normalised symbol across all active trades.
+ * match by symbol among this account's active trades.
  */
 async function findActiveTradesBySymbol(
   db: TypedClient,
   userId: string,
-  symbol: string
+  symbol: string,
+  brokerConnectionId: string
 ): Promise<TradeRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (db as any)
@@ -152,19 +158,21 @@ async function findActiveTradesBySymbol(
     .select("*")
     .eq("user_id", userId)
     .eq("symbol", symbol)
+    .eq("broker_connection_id", brokerConnectionId)
     .in("status", ["PENDING", "OPEN"]);
   return (data ?? []) as TradeRow[];
 }
 
 /**
  * Fallback for follow-ups with no message reference and no symbol
- * (e.g. "Set SL to breakeven", "close it"): apply to the active trades opened
- * from THIS channel's signals. A provider posting a bare management
- * instruction in their channel means it for the trade(s) they just gave there.
+ * (e.g. "Set SL to breakeven", "close it"): apply to this account's active
+ * trades opened from THIS channel's signals. A provider posting a bare
+ * management instruction in their channel means it for the trade(s) they gave.
  */
 async function findActiveTradesBySource(
   db: TypedClient,
-  sourceId: string
+  sourceId: string,
+  brokerConnectionId: string
 ): Promise<TradeRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: psRows } = await (db as any)
@@ -178,6 +186,7 @@ async function findActiveTradesBySource(
     .from("trades")
     .select("*")
     .in("parsed_signal_id", ids)
+    .eq("broker_connection_id", brokerConnectionId)
     .in("status", ["PENDING", "OPEN"]);
   return (data ?? []) as TradeRow[];
 }
@@ -476,14 +485,14 @@ async function dispatchFollowUp(
   let matchMethod: string;
 
   if (references_prior_message_id) {
-    activeTrades = await findActiveTrades(db, sourceId, references_prior_message_id);
+    activeTrades = await findActiveTrades(db, sourceId, references_prior_message_id, brokerConn.id);
     matchMethod = `msg_id=${references_prior_message_id}`;
   } else if (parsed.symbol) {
-    activeTrades = await findActiveTradesBySymbol(db, userId, parsed.symbol);
+    activeTrades = await findActiveTradesBySymbol(db, userId, parsed.symbol, brokerConn.id);
     matchMethod = `symbol=${parsed.symbol}`;
   } else {
     // No reply-reference and no symbol → apply to this channel's open trade(s).
-    activeTrades = await findActiveTradesBySource(db, sourceId);
+    activeTrades = await findActiveTradesBySource(db, sourceId, brokerConn.id);
     matchMethod = "channel";
   }
 
@@ -628,6 +637,8 @@ async function closeAllUserTrades(
     .from("trades")
     .select("id, broker_order_id, status")
     .eq("user_id", userId)
+    // Only this account's legs — each order lives on its own broker connection.
+    .eq("broker_connection_id", brokerConn.id)
     .in("status", ["PENDING", "OPEN"]);
 
   const trades = (data ?? []) as TradeRow[];
@@ -761,6 +772,8 @@ async function applyBreakevenOpportunities(
     .from("trades")
     .select("id, parsed_signal_id, broker_order_id, entry_price, sl")
     .eq("user_id", userId)
+    // Only this account's open legs (breakeven is placed via this connection).
+    .eq("broker_connection_id", brokerConn.id)
     .eq("status", "OPEN")
     .eq("breakeven_applied", false)
     .not("entry_price", "is", null)
@@ -883,11 +896,15 @@ async function executeNewSignal(
   }
 
   // ── Idempotency pre-check ────────────────────────────────────────────────
+  // Scoped to THIS account: with multi-account copying, the same parsed_signal
+  // legitimately has trades on other accounts — only a prior leg on the SAME
+  // account means this job already ran.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { count } = await (db as any)
     .from("trades")
     .select("*", { count: "exact", head: true })
     .eq("parsed_signal_id", parsedSignalId)
+    .eq("broker_connection_id", brokerConnectionId)
     .in("status", ["PENDING", "OPEN"]);
 
   if (count && count > 0) {
@@ -1176,10 +1193,10 @@ async function handleCancelJob(
     payload: { idempotency_key: idempotencyKey, source: "telegram_delete" },
   });
 
-  const activeTrades = await findActiveTradesBySignalId(deps.db, cancelTargetSignalId);
+  const activeTrades = await findActiveTradesBySignalId(deps.db, cancelTargetSignalId, brokerConnectionId);
 
   if (activeTrades.length === 0) {
-    console.log(`${tag} cancel: no PENDING/OPEN trades — already settled, skipping`);
+    console.log(`${tag} cancel: no PENDING/OPEN trades on this account — already settled, skipping`);
     return;
   }
 
