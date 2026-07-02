@@ -152,60 +152,71 @@ async function processKillCloseRequests(): Promise<void> {
   for (const src of sources as { id: string; user_id: string; telegram_chat_id: string }[]) {
     const tag = `[kill-close ${src.id.slice(0, 8)}]`;
     try {
-      // Find the user's primary active broker connection (oldest active as
-      // the deterministic fallback) — matches the listener's routing order.
-      const { data: connRow } = await dbAny
-        .from("broker_connections")
-        .select("id, metaapi_account_id, platform")
-        .eq("user_id", src.user_id)
-        .eq("is_active", true)
-        .order("is_primary", { ascending: false })
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .single();
+      // Two-step: fetch this source's signal ids first — supabase-js .in()
+      // takes an ARRAY, not a query builder (a builder throws "object is not
+      // iterable" and the source is never processed).
+      const { data: psRows } = await dbAny
+        .from("parsed_signals")
+        .select("id")
+        .eq("source_id", src.id);
+      const psIds = ((psRows ?? []) as { id: string }[]).map((r) => r.id);
 
-      if (connRow) {
-        const brokerConn = {
-          id: connRow.id as string,
-          userId: src.user_id,
-          metaApiAccountId: connRow.metaapi_account_id as string,
-          platform: (connRow.platform ?? "MT5") as "MT5" | "MT4",
-        };
-        metaApiExecutor.register(brokerConn);
-
-        // Find all open/pending trades from this source
+      if (psIds.length > 0) {
+        // Open/pending trades from this source across ALL the user's accounts
+        // (multi-account copying: each leg closes on its own connection).
         const { data: trades } = await dbAny
           .from("trades")
-          .select("id, broker_order_id, status")
+          .select("id, broker_order_id, status, broker_connection_id")
           .eq("user_id", src.user_id)
-          .eq("broker_connection_id", connRow.id)
-          .in("status", ["PENDING", "OPEN"])
-          .in(
-            "parsed_signal_id",
-            dbAny
-              .from("parsed_signals")
-              .select("id")
-              .eq("source_id", src.id)
+          .in("parsed_signal_id", psIds)
+          .in("status", ["PENDING", "OPEN"]);
+
+        const tradeRows = (trades ?? []) as {
+          id: string;
+          broker_order_id: string | null;
+          status: string;
+          broker_connection_id: string;
+        }[];
+
+        if (tradeRows.length > 0) {
+          const connIds = [...new Set(tradeRows.map((t) => t.broker_connection_id))];
+          const { data: connRows } = await dbAny
+            .from("broker_connections")
+            .select("id, metaapi_account_id, platform")
+            .in("id", connIds);
+          const connMap = new Map(
+            ((connRows ?? []) as { id: string; metaapi_account_id: string | null; platform: string | null }[]).map(
+              (c) => [c.id, c]
+            )
           );
 
-        let closed = 0;
-        for (const t of (trades ?? []) as { id: string; broker_order_id: string | null; status: string }[]) {
-          if (!t.broker_order_id) continue;
-          const ref = { connectionId: brokerConn.id, brokerId: t.broker_order_id };
-          try {
-            if (t.status === "PENDING") {
-              await metaApiExecutor.cancelPending(ref);
-              await dbAny.from("trades").update({ status: "CANCELLED" }).eq("id", t.id);
-            } else {
-              await metaApiExecutor.closePosition(ref);
-              await dbAny.from("trades").update({ status: "CLOSED", closed_at: new Date().toISOString() }).eq("id", t.id);
+          let closed = 0;
+          for (const t of tradeRows) {
+            if (!t.broker_order_id) continue;
+            const conn = connMap.get(t.broker_connection_id);
+            if (!conn?.metaapi_account_id) continue;
+            metaApiExecutor.register({
+              id: conn.id,
+              userId: src.user_id,
+              metaApiAccountId: conn.metaapi_account_id,
+              platform: (conn.platform ?? "MT5") as "MT5" | "MT4",
+            });
+            const ref = { connectionId: conn.id, brokerId: t.broker_order_id };
+            try {
+              if (t.status === "PENDING") {
+                await metaApiExecutor.cancelPending(ref);
+                await dbAny.from("trades").update({ status: "CANCELLED" }).eq("id", t.id);
+              } else {
+                await metaApiExecutor.closePosition(ref);
+                await dbAny.from("trades").update({ status: "CLOSED", closed_at: new Date().toISOString() }).eq("id", t.id);
+              }
+              closed++;
+            } catch (err) {
+              log.error(`${tag} failed to close trade ${t.id.slice(0, 8)}`, { error: (err as Error).message });
             }
-            closed++;
-          } catch (err) {
-            log.error(`${tag} failed to close trade ${t.id.slice(0, 8)}`, { error: (err as Error).message });
           }
+          log.info(`${tag} closed ${closed} trade(s)`);
         }
-        log.info(`${tag} closed ${closed} trade(s)`);
       }
 
       // Hard-delete the source (cascades to parsed_signals + trades via FK)

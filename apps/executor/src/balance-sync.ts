@@ -72,7 +72,14 @@ export async function syncBrokerBalances(
       synced += 1;
     } catch (err) {
       // One broker failing (offline/creds) must not stop the others.
-      log?.warn?.("balance sync: broker refresh failed", { brokerId: row.id, error: (err as Error).message });
+      const msg = (err as Error).message ?? "";
+      log?.warn?.("balance sync: broker refresh failed", { brokerId: row.id, error: msg });
+      // The MetaApi account was deleted/expired — surface it in the UI instead
+      // of leaving a stale "connected" badge on a dead account.
+      if (/trading account .* not found/i.test(msg)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db as any).from("broker_connections").update({ status: "error" }).eq("id", row.id);
+      }
     }
   }
   if (synced > 0) log?.info("balance sync complete", { brokers: synced });

@@ -1445,22 +1445,47 @@ async function processJob(
   };
 
   // ── 8. Route: follow-up (manage existing trade) or new signal ─────────────
-  if (isFollowUp) {
-    // The new-signal confidence threshold does NOT apply here — dispatchFollowUp's
-    // trade-matching (reply-reference / symbol / channel) is the real guard.
-    await dispatchFollowUp(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, sourceId);
-    return;
-  }
+  try {
+    if (isFollowUp) {
+      // The new-signal confidence threshold does NOT apply here — dispatchFollowUp's
+      // trade-matching (reply-reference / symbol / channel) is the real guard.
+      await dispatchFollowUp(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, sourceId);
+      return;
+    }
 
-  // New signal: enforce the confidence threshold before placing anything.
-  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
-    const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
-    console.log(`${tag} skipped: ${reason}`);
-    await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, confidence: parsed.confidence } });
-    return;
-  }
+    // New signal: enforce the confidence threshold before placing anything.
+    if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+      const reason = `confidence_${parsed.confidence.toFixed(2)}_below_${CONFIDENCE_THRESHOLD}`;
+      console.log(`${tag} skipped: ${reason}`);
+      await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason, confidence: parsed.confidence } });
+      return;
+    }
 
-  await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, sourceOverrides);
+    await executeNewSignal(tag, db, executor, brokerConn, parsed, parsedSignalId, userId, brokerConnectionId, sourceId, idempotencyKey, planSignalCap, sourceOverrides);
+  } catch (err) {
+    // Fail-safe: the MetaApi account behind this connection no longer exists
+    // (expired/removed broker demo, deleted on MetaApi). Retrying can never
+    // succeed — record a transparent skip instead of dying silently, and mark
+    // the connection so the dashboard shows it as broken.
+    const msg = (err as Error).message ?? "";
+    if (/trading account .* not found/i.test(msg)) {
+      console.log(`${tag} skipped: broker account missing on MetaApi — marking connection error`);
+      await writeAuditEvent(db, {
+        userId,
+        eventType: "skipped",
+        parsedSignalId,
+        payload: {
+          reason: "broker_account_missing",
+          broker_connection_id: brokerConnectionId,
+          detail: "This account no longer exists at the broker/MetaApi — reconnect or remove it in Settings.",
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from("broker_connections").update({ status: "error" }).eq("id", brokerConnectionId);
+      return;
+    }
+    throw err;
+  }
 }
 
 // ── Worker factory ────────────────────────────────────────────────────────────
