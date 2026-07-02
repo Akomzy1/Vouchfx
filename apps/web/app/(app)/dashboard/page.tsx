@@ -3,38 +3,13 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import OpenPositions from "@/components/dashboard/OpenPositions";
 import ActivityFeed from "@/components/dashboard/ActivityFeed";
-import EquitySparkline from "@/components/dashboard/EquitySparkline";
 import ConnectionBanner from "@/components/dashboard/ConnectionBanner";
-import {
-  Wallet,
-  TrendingUp,
-  ArrowUpRight,
-  Layers,
-  Zap,
-  Lock,
-  CandlestickChart,
-  Activity,
-  ArrowRight,
-} from "lucide-react";
+import AccountSummary, { type ModeAggregate } from "@/components/dashboard/AccountSummary";
+import { CandlestickChart, Activity, ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
-
-function fmtCcy(n: number | null): string {
-  if (n == null) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
-}
-
-function fmtSigned(n: number): string {
-  const s = n < 0 ? "-" : "+";
-  return `${s}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -51,42 +26,6 @@ function dateChip(): string {
 }
 
 /* ── Prototype-style primitives ── */
-
-function StatCard({
-  label,
-  icon: Icon,
-  value,
-  tone = "ink",
-  sub,
-  children,
-  span,
-}: {
-  label: string;
-  icon: React.ElementType;
-  value: React.ReactNode;
-  tone?: "ink" | "profit" | "loss" | "teal";
-  sub?: React.ReactNode;
-  children?: React.ReactNode;
-  span?: string;
-}) {
-  const valueColor = {
-    ink: "text-text-primary",
-    profit: "text-profit",
-    loss: "text-loss",
-    teal: "text-primary-light",
-  }[tone];
-  return (
-    <div className={`flex flex-col rounded-2xl border border-border bg-surface p-4 ${span ?? ""}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-text-muted">{label}</span>
-        <Icon size={15} className="text-text-muted" />
-      </div>
-      <div className={`num mt-2 text-[22px] font-bold leading-none ${valueColor}`}>{value}</div>
-      {sub && <div className="mt-1.5 text-[12px] text-text-secondary">{sub}</div>}
-      {children}
-    </div>
-  );
-}
 
 function Panel({
   title,
@@ -152,12 +91,12 @@ export default async function DashboardPage() {
     { data: riskRow },
   ] = await Promise.all([
     db.from("broker_connections")
-      .select("id, label, is_active, status, platform, last_balance_usd, last_equity_usd, last_synced_at, today_realized_pnl_usd, today_pnl_date")
+      .select("id, label, is_active, is_primary, copy_enabled, account_mode, status, platform, last_balance_usd, last_equity_usd, last_synced_at, today_realized_pnl_usd, today_pnl_date")
       .order("is_primary", { ascending: false })
       .order("created_at", { ascending: true }),
     db.from("signal_sources").select("id, title, is_enabled"),
     db.from("trades")
-      .select("id, symbol, side, volume, entry_price, sl, tp, status, opened_at, created_at")
+      .select("id, broker_connection_id, symbol, side, volume, entry_price, sl, tp, status, opened_at, created_at")
       .in("status", ["OPEN", "PENDING"])
       .order("created_at", { ascending: false })
       .limit(20),
@@ -180,49 +119,78 @@ export default async function DashboardPage() {
   ]);
 
   // ── Derived stats ──────────────────────────────────────────────────────────
-  const primaryBroker = (brokers ?? [])[0] as
-    | {
-        id: string;
-        label: string | null;
-        is_active: boolean;
-        status: string | null;
-        last_balance_usd: number | null;
-        last_equity_usd: number | null;
-        last_synced_at: string | null;
-        today_realized_pnl_usd: number | null;
-        today_pnl_date: string | null;
-      }
-    | undefined;
+  type BrokerRow = {
+    id: string;
+    label: string | null;
+    is_active: boolean;
+    copy_enabled: boolean;
+    account_mode: "demo" | "live" | null;
+    status: string | null;
+    last_balance_usd: number | null;
+    last_equity_usd: number | null;
+    today_realized_pnl_usd: number | null;
+    today_pnl_date: string | null;
+  };
+  const allBrokers = (brokers ?? []) as BrokerRow[];
+  const primaryBroker = allBrokers[0];
 
-  const balance = primaryBroker?.last_balance_usd ?? null;
-  const equity = primaryBroker?.last_equity_usd ?? null;
-  const floatingPnl = balance != null && equity != null ? equity - balance : null;
-
-  // Today's realized P&L — only trust the cached figure if it's actually for
-  // today (UTC); otherwise it's yesterday's stale number, so show 0 for today.
-  const todayUtc = new Date().toISOString().slice(0, 10);
-  const todayRealizedPnl =
-    primaryBroker?.today_pnl_date === todayUtc ? Number(primaryBroker.today_realized_pnl_usd ?? 0) : 0;
-  const hasBroker = (brokers ?? []).length > 0;
+  const hasBroker = allBrokers.length > 0;
   const hasTelegram = (sources ?? []).length > 0;
-  const brokerOk = !!primaryBroker && (primaryBroker.status === "connected" || primaryBroker.is_active);
+
+  // Accounts a signal currently copies to (VCH-BRK-04). Money figures aggregate
+  // these, split by mode so demo and live are never blended.
+  const copyAccts = allBrokers.filter((b) => b.is_active && b.copy_enabled);
+  const copyIds = new Set(copyAccts.map((b) => b.id));
+  const accountMap: Record<string, { label: string; mode: "demo" | "live" | null }> = Object.fromEntries(
+    copyAccts.map((b) => [b.id, { label: b.label ?? "MT5 account", mode: b.account_mode }])
+  );
+  const brokerOk = copyAccts.some((b) => b.status === "connected" || b.is_active);
+
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  function aggregate(mode: "live" | "demo"): ModeAggregate | null {
+    const accts = copyAccts.filter((b) => b.account_mode === mode);
+    if (accts.length === 0) return null;
+    let balSum = 0, balHas = false, eqSum = 0, eqHas = false, today = 0;
+    for (const a of accts) {
+      if (a.last_balance_usd != null) { balSum += Number(a.last_balance_usd); balHas = true; }
+      if (a.last_equity_usd != null) { eqSum += Number(a.last_equity_usd); eqHas = true; }
+      // Only trust today's cached P&L when the cache is actually dated today.
+      if (a.today_pnl_date === todayUtc) today += Number(a.today_realized_pnl_usd ?? 0);
+    }
+    const balance = balHas ? balSum : null;
+    const equity = eqHas ? eqSum : null;
+    return {
+      balance,
+      equity,
+      floating: balance != null && equity != null ? equity - balance : null,
+      todayPnl: today,
+      accountCount: accts.length,
+    };
+  }
+  const liveAgg = aggregate("live");
+  const demoAgg = aggregate("demo");
+
+  // Open trades across copy-enabled accounts (a count — safe across modes).
+  const openAccountIds = copyIds.size > 0 ? [...copyIds] : null;
+  const initialOpenTrades = ((openTrades ?? []) as Array<{ broker_connection_id: string }>).filter(
+    (t) => !openAccountIds || openAccountIds.includes(t.broker_connection_id)
+  ) as Parameters<typeof OpenPositions>[0]["initialTrades"];
+  const openCount = initialOpenTrades.length;
 
   const signalsTodayCount = new Set(
     ((todayTradeRows ?? []) as { parsed_signal_id: string }[]).map((r) => r.parsed_signal_id)
   ).size;
   const signalDailyLimit: number =
     (riskRow as { daily_signal_limit?: number } | null)?.daily_signal_limit ?? 0;
-  const limitPct =
-    signalDailyLimit > 0 ? Math.min(100, Math.round((signalsTodayCount / signalDailyLimit) * 100)) : 0;
 
   const sparklineData = ((sparkRaw ?? []) as { created_at: string; payload: Record<string, unknown> | null }[])
     .filter((r) => r.payload && typeof r.payload.account_balance === "number")
     .map((r) => ({ time: r.created_at, balance: r.payload!.account_balance as number }));
-  if (sparklineData.length === 0 && balance != null) {
-    sparklineData.push({ time: new Date().toISOString(), balance });
+  const anyBalance = liveAgg?.balance ?? demoAgg?.balance ?? null;
+  if (sparklineData.length === 0 && anyBalance != null) {
+    sparklineData.push({ time: new Date().toISOString(), balance: anyBalance });
   }
 
-  const openCount = (openTrades ?? []).length;
   // Greet by first name: users.full_name → auth metadata (Google) → email prefix
   const fullName = (
     userRow?.full_name ??
@@ -232,9 +200,6 @@ export default async function DashboardPage() {
   ).trim();
   const name = fullName ? fullName.split(/\s+/)[0]! : ((user.email ?? "").split("@")[0] ?? "");
   const displayName = name.charAt(0).toUpperCase() + name.slice(1);
-
-  const pnlTone = floatingPnl == null ? "ink" : floatingPnl >= 0 ? "profit" : "loss";
-  const todayTone = todayRealizedPnl > 0 ? "profit" : todayRealizedPnl < 0 ? "loss" : "ink";
 
   return (
     <div>
@@ -271,91 +236,16 @@ export default async function DashboardPage() {
         </span>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <StatCard
-          label="Account balance"
-          icon={Wallet}
-          value={fmtCcy(balance)}
-          sub={
-            <span className="flex items-center gap-1 text-text-muted">
-              <Lock size={11} /> Realized
-            </span>
-          }
-        />
-
-        <StatCard label="Equity" icon={TrendingUp} value={fmtCcy(equity)} span="col-span-2 sm:col-span-1">
-          <div className="mt-2 h-[42px] w-full">
-            <EquitySparkline data={sparklineData} currency="USD" />
-          </div>
-        </StatCard>
-
-        <StatCard
-          label="Today's P&L"
-          icon={ArrowUpRight}
-          value={fmtSigned(todayRealizedPnl)}
-          tone={todayTone as "ink" | "profit" | "loss"}
-          sub={
-            <span className="flex items-center gap-1 text-text-muted">
-              <Lock size={11} /> Realized today
-            </span>
-          }
-        />
-
-        <StatCard
-          label="Floating P&L"
-          icon={Activity}
-          value={floatingPnl != null ? fmtSigned(floatingPnl) : "—"}
-          tone={pnlTone as "ink" | "profit" | "loss"}
-          sub={
-            floatingPnl != null ? (
-              <span className={floatingPnl >= 0 ? "text-profit" : "text-loss"}>
-                Unrealized · {openCount} trade{openCount !== 1 ? "s" : ""}
-              </span>
-            ) : (
-              "Unrealized"
-            )
-          }
-        />
-
-        <StatCard
-          label="Open trades"
-          icon={Layers}
-          value={String(openCount)}
-          sub={
-            <span className="flex items-center gap-1 text-text-muted">
-              <span className={`h-1.5 w-1.5 rounded-full ${brokerOk ? "live-dot bg-profit" : "bg-loss"}`} />
-              {brokerOk ? "Executing" : "Queued"}
-            </span>
-          }
-        />
-
-        <StatCard
-          label="Signals today"
-          icon={Zap}
-          tone="teal"
-          value={
-            signalDailyLimit > 0 ? (
-              <span>
-                {signalsTodayCount} <span className="text-base text-text-muted">/ {signalDailyLimit}</span>
-              </span>
-            ) : (
-              String(signalsTodayCount)
-            )
-          }
-        >
-          {signalDailyLimit > 0 && (
-            <div className="mt-3">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-elevated">
-                <div className="h-full rounded-full bg-primary" style={{ width: `${limitPct}%` }} />
-              </div>
-              <div className="mt-1.5 text-[12px] text-text-secondary">
-                {Math.max(0, signalDailyLimit - signalsTodayCount)} left today
-              </div>
-            </div>
-          )}
-        </StatCard>
-      </div>
+      {/* Stat cards — aggregated across the accounts you're copying to. */}
+      <AccountSummary
+        live={liveAgg}
+        demo={demoAgg}
+        openCount={openCount}
+        brokerOk={brokerOk}
+        sparklineData={sparklineData}
+        signalsTodayCount={signalsTodayCount}
+        signalDailyLimit={signalDailyLimit}
+      />
 
       {/* Panels */}
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.65fr_1fr]">
@@ -372,8 +262,10 @@ export default async function DashboardPage() {
           }
         >
           <OpenPositions
-            initialTrades={(openTrades ?? []) as Parameters<typeof OpenPositions>[0]["initialTrades"]}
+            initialTrades={initialOpenTrades}
             userId={user.id}
+            accountIds={openAccountIds}
+            accounts={accountMap}
           />
         </Panel>
 

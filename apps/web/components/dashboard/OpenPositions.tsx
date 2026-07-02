@@ -6,6 +6,7 @@ import { ArrowUpRight, ArrowDownRight, Clock } from "lucide-react";
 
 interface Trade {
   id: string;
+  broker_connection_id: string;
   symbol: string;
   side: "BUY" | "SELL";
   volume: number;
@@ -20,6 +21,10 @@ interface Trade {
 interface Props {
   initialTrades: Trade[];
   userId: string;
+  /** Copy-enabled account ids to scope to; null = show all accounts. */
+  accountIds: string[] | null;
+  /** broker_connection_id → { label, mode } for the Account column. */
+  accounts: Record<string, { label: string; mode: "demo" | "live" | null }>;
 }
 
 function timeAgo(iso: string): string {
@@ -35,6 +40,24 @@ function timeAgo(iso: string): string {
 function fmtPrice(n: number | null): string {
   if (n == null) return "—";
   return n.toFixed(n >= 100 ? 2 : 5);
+}
+
+function AccountTag({ acct }: { acct?: { label: string; mode: "demo" | "live" | null } }) {
+  if (!acct) return <span className="text-text-muted">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="max-w-[120px] truncate text-[12px] text-text-secondary">{acct.label}</span>
+      {acct.mode && (
+        <span
+          className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase ${
+            acct.mode === "live" ? "bg-profit/10 text-profit" : "bg-warning/10 text-warning"
+          }`}
+        >
+          {acct.mode}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function SideTag({ side }: { side: "BUY" | "SELL" }) {
@@ -53,11 +76,14 @@ function SideTag({ side }: { side: "BUY" | "SELL" }) {
   );
 }
 
-export default function OpenPositions({ initialTrades, userId }: Props) {
+export default function OpenPositions({ initialTrades, userId, accountIds, accounts }: Props) {
   const [trades, setTrades] = useState<Trade[]>(initialTrades);
+  // Stable key so the effect doesn't re-subscribe on every render.
+  const accountKey = accountIds ? accountIds.join(",") : "*";
 
   useEffect(() => {
     const supabase = createClient();
+    const scope = accountKey === "*" ? null : accountKey.split(",");
 
     const channel = supabase
       .channel("open-positions")
@@ -71,12 +97,13 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
         },
         () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (supabase as any)
+          let q = (supabase as any)
             .from("trades")
-            .select("id, symbol, side, volume, entry_price, sl, tp, status, opened_at, created_at")
+            .select("id, broker_connection_id, symbol, side, volume, entry_price, sl, tp, status, opened_at, created_at")
             .eq("user_id", userId)
-            .in("status", ["OPEN", "PENDING"])
-            .order("created_at", { ascending: false })
+            .in("status", ["OPEN", "PENDING"]);
+          if (scope) q = q.in("broker_connection_id", scope);
+          q.order("created_at", { ascending: false })
             .limit(20)
             .then(({ data }: { data: Trade[] | null }) => {
               if (data) setTrades(data);
@@ -88,7 +115,7 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [userId, accountKey]);
 
   if (trades.length === 0) {
     return (
@@ -100,6 +127,7 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
   }
 
   const totalLots = trades.reduce((a, t) => a + (t.volume ?? 0), 0);
+  const showAccount = Object.keys(accounts).length > 1;
   const H = "px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-text-muted";
   const C = "px-3 py-3 text-sm";
 
@@ -110,6 +138,7 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
           <thead>
             <tr className="border-b border-border">
               <th className={H}>Symbol</th>
+              {showAccount && <th className={H}>Account</th>}
               <th className={H}>Side</th>
               <th className={`${H} text-right`}>Lots</th>
               <th className={`${H} text-right`}>Entry</th>
@@ -125,6 +154,11 @@ export default function OpenPositions({ initialTrades, userId }: Props) {
                 className="border-b border-border/50 transition-colors last:border-0 hover:bg-surface-elevated/40"
               >
                 <td className={`${C} font-semibold text-text-primary`}>{t.symbol}</td>
+                {showAccount && (
+                  <td className={C}>
+                    <AccountTag acct={accounts[t.broker_connection_id]} />
+                  </td>
+                )}
                 <td className={C}>
                   <SideTag side={t.side} />
                 </td>

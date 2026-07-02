@@ -15,11 +15,11 @@
  *      (P1.13 adds MetaApi client-request-id + getState reconciliation.)
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import { Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CONFIDENCE_THRESHOLD, MODELS, env } from "@vouchfx/config";
-import { MetaApiExecutor } from "@vouchfx/core/executor";
+import type { MetaApiExecutor } from "@vouchfx/core/executor";
 import { createPushSender } from "@vouchfx/core/push";
 import {
   parseSignalWithEscalation,

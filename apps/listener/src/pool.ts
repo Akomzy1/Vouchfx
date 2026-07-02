@@ -244,9 +244,9 @@ export class UserPool {
         .select("user_id, id, telegram_chat_id")
         .in("user_id", userIds)
         .eq("is_enabled", true),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       // Every ACTIVE account with its copy_enabled flag. Ordered primary-first
       // then oldest so the fan-out list is deterministic.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.db as any)
         .from("broker_connections")
         .select("user_id, id, is_primary, created_at, copy_enabled")
