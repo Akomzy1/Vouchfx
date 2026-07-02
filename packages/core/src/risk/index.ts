@@ -6,6 +6,8 @@ export { roundToStep, clampVolume, computeVolume } from "./sizing";
 export type { ComputeVolumeInput, ComputeVolumeResult } from "./sizing";
 export { gateAndSize } from "./gate";
 export type { GateInput, GateResult } from "./gate";
+export { buildModifyChanges } from "./follow-up";
+export type { ModifyLevels } from "./follow-up";
 export { evaluatePropRules } from "./prop-gate";
 export type { PropRuleset, PropAccountState, PropRuleCheck, PropGateResult } from "./prop-gate";
 export {

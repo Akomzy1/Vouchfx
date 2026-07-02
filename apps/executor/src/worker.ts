@@ -24,6 +24,7 @@ import { createPushSender } from "@vouchfx/core/push";
 import {
   parseSignalWithEscalation,
   gateAndSize,
+  buildModifyChanges,
   DEFAULT_RISK_SETTINGS,
   notify,
   canExecute,
@@ -505,47 +506,42 @@ async function dispatchFollowUp(
   console.log(`${tag} follow-up ${follow_up_type} — found ${activeTrades.length} active leg(s) via ${matchMethod}`);
 
   switch (follow_up_type) {
-    case "MODIFY_SL": {
-      if (parsed.sl == null) {
-        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "MODIFY_SL_no_sl_value" } });
-        return;
-      }
-      let applied = 0, missing = 0;
-      for (const trade of activeTrades) {
-        if (!trade.broker_order_id) continue;
-        const r = await modifyLegSafe(
-          db, executor, brokerConn, trade,
-          { sl: parsed.sl }, { sl: parsed.sl }, tag, "MODIFY_SL",
-        );
-        if (r === "applied") applied++; else missing++;
-      }
-      if (applied > 0) {
-        await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_sl: parsed.sl, legs: applied, skipped_missing: missing } });
-      } else {
-        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "no_live_positions_to_modify", missing } });
-      }
-      break;
-    }
-
+    case "MODIFY_SL":
     case "MODIFY_TP": {
-      if (!parsed.tps.length) {
-        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "MODIFY_TP_no_tp_value" } });
+      // A provider often sends BOTH levels in one message ("SL 3350 TP 3280")
+      // while the classifier emits a single follow_up_type — apply every level
+      // present rather than silently dropping the second one. TPs assign
+      // round-robin across legs (most common case: 1 new TP for 1 leg).
+      const probe = buildModifyChanges(follow_up_type, parsed.sl, parsed.tps, 0);
+      if (!probe) {
+        const reason = follow_up_type === "MODIFY_SL" ? "MODIFY_SL_no_sl_value" : "MODIFY_TP_no_tp_value";
+        await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason } });
         return;
       }
-      // Assign new TPs round-robin across legs (most common case: 1 new TP for 1 leg)
       let applied = 0, missing = 0;
       for (let i = 0; i < activeTrades.length; i++) {
         const trade = activeTrades[i]!;
         if (!trade.broker_order_id) continue;
-        const newTp = parsed.tps[i % parsed.tps.length]!;
+        const changes = buildModifyChanges(follow_up_type, parsed.sl, parsed.tps, i)!;
         const r = await modifyLegSafe(
           db, executor, brokerConn, trade,
-          { tp: newTp }, { tp: newTp }, tag, "MODIFY_TP",
+          changes, { ...changes }, tag, follow_up_type,
         );
         if (r === "applied") applied++; else missing++;
       }
       if (applied > 0) {
-        await writeAuditEvent(db, { userId, eventType: "modified", parsedSignalId, payload: { follow_up_type, new_tps: parsed.tps, legs: applied, skipped_missing: missing } });
+        await writeAuditEvent(db, {
+          userId,
+          eventType: "modified",
+          parsedSignalId,
+          payload: {
+            follow_up_type,
+            ...(probe.sl != null ? { new_sl: probe.sl } : {}),
+            ...(probe.tp != null ? { new_tps: parsed.tps } : {}),
+            legs: applied,
+            skipped_missing: missing,
+          },
+        });
       } else {
         await writeAuditEvent(db, { userId, eventType: "skipped", parsedSignalId, payload: { reason: "no_live_positions_to_modify", missing } });
       }
