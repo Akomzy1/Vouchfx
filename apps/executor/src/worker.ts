@@ -356,7 +356,8 @@ async function checkDailyLimits(
   db: TypedClient,
   userId: string,
   sourceId: string,
-  riskSettings: RiskSettings
+  riskSettings: RiskSettings,
+  currentParsedSignalId: string
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
@@ -373,7 +374,13 @@ async function checkDailyLimits(
 
   const tradeRows = (todayTrades ?? []) as { id: string; parsed_signal_id: string }[];
   const tradeLegCount = tradeRows.length;
-  const globalSignalCount = new Set(tradeRows.map((r) => r.parsed_signal_id)).size;
+  // Signal-count semantics: ONE signal counts once no matter how many trade
+  // legs (multi-TP) or accounts (multi-account fan-out) it produced. Exclude
+  // the CURRENT signal — if another account's job already acted on it today,
+  // executing it here doesn't consume an additional signal slot.
+  const actedSignalIds = new Set(tradeRows.map((r) => r.parsed_signal_id));
+  actedSignalIds.delete(currentParsedSignalId);
+  const globalSignalCount = actedSignalIds.size;
 
   // Max trade legs per day
   if (riskSettings.maxTradesPerDay > 0 && tradeLegCount >= riskSettings.maxTradesPerDay) {
@@ -397,7 +404,8 @@ async function checkDailyLimits(
     ?.daily_signal_limit ?? 0;
 
   if (channelLimit > 0) {
-    const allActedPsIds = [...new Set(tradeRows.map((r) => r.parsed_signal_id))];
+    // Same signal-count semantics as above: the current signal is excluded.
+    const allActedPsIds = [...actedSignalIds];
     let channelSignalCount = 0;
 
     if (allActedPsIds.length > 0) {
@@ -939,7 +947,7 @@ async function executeNewSignal(
     }
   }
 
-  const limitsResult = await checkDailyLimits(db, userId, sourceId, riskSettings);
+  const limitsResult = await checkDailyLimits(db, userId, sourceId, riskSettings, parsedSignalId);
   if (!limitsResult.ok) {
     console.log(`${tag} skipped by daily limits: ${limitsResult.reason}`);
     await writeAuditEvent(db, {
