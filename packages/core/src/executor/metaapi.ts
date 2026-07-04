@@ -146,17 +146,18 @@ export class MetaApiExecutor implements Executor {
   async getDeals(conn: BrokerConnection, since: Date): Promise<any[]> {
     this.register(conn);
     const connection = await this.rpc(conn.id);
+    // RPC returns a wrapper ({ deals: [...] }), not a bare array.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deals: any[] = await connection.getDealsByTimeRange(since, new Date());
-    return deals ?? [];
+    const res: any = await connection.getDealsByTimeRange(since, new Date());
+    if (Array.isArray(res)) return res;
+    return Array.isArray(res?.deals) ? res.deals : [];
   }
 
   async getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number> {
-    this.register(conn);
-    const connection = await this.rpc(conn.id);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const deals: any[] = await connection.getDealsByTimeRange(since, new Date());
+      // getDeals normalises the RPC wrapper ({ deals: [...] }) — reducing the
+      // wrapper directly threw and this silently returned 0 for everyone.
+      const deals = await this.getDeals(conn, since);
       return deals.reduce((sum: number, d: unknown) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return sum + (Number((d as any).profit) || 0);

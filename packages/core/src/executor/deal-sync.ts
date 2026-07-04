@@ -35,7 +35,8 @@ function num(v: unknown): number {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function extractCloseDeals(rawDeals: any[]): CloseDeal[] {
   const out: CloseDeal[] = [];
-  for (const d of rawDeals ?? []) {
+  if (!Array.isArray(rawDeals)) return out;
+  for (const d of rawDeals) {
     if (!d || d.positionId == null || d.id == null) continue;
     const entry = String(d.entryType ?? "");
     if (entry !== "DEAL_ENTRY_OUT" && entry !== "DEAL_ENTRY_OUT_BY") continue;

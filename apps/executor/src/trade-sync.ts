@@ -146,8 +146,12 @@ export function startTradeSync(
   log?: Logger,
   intervalMs = 3 * 60_000
 ): () => void {
-  const boot = setTimeout(() => void syncTradeCloses(db, executor, log), 25_000);
-  const timer = setInterval(() => void syncTradeCloses(db, executor, log), intervalMs);
+  const run = () =>
+    syncTradeCloses(db, executor, log).catch((err) =>
+      log?.error("trade sync failed", { error: (err as Error).message })
+    );
+  const boot = setTimeout(run, 25_000);
+  const timer = setInterval(run, intervalMs);
   return () => {
     clearTimeout(boot);
     clearInterval(timer);
