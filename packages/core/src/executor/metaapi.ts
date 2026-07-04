@@ -137,6 +137,20 @@ export class MetaApiExecutor implements Executor {
     return { balance: info.balance as number, equity: info.equity as number, accountMode };
   }
 
+  /**
+   * Raw deal history since `since` — the trade-sync job feeds this through the
+   * pure deal-sync helpers to record realised P&L per trade. Throws when the
+   * history API is unavailable so the caller can log per-account.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getDeals(conn: BrokerConnection, since: Date): Promise<any[]> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deals: any[] = await connection.getDealsByTimeRange(since, new Date());
+    return deals ?? [];
+  }
+
   async getTodayRealizedPnl(conn: BrokerConnection, since: Date): Promise<number> {
     this.register(conn);
     const connection = await this.rpc(conn.id);

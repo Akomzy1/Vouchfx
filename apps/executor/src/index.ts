@@ -27,6 +27,7 @@ import { startRuleMonitorSchedule } from "./rule-monitor";
 import { startCalendarSchedule } from "./calendar";
 import { startCommissionSweep } from "./commission";
 import { startBalanceSync } from "./balance-sync";
+import { startTradeSync } from "./trade-sync";
 
 const env = parseEnv();
 const log = createLogger("executor");
@@ -115,6 +116,10 @@ const stopCommissionSweep = startCommissionSweep(db, log);
 
 // Keep the dashboard's cached broker balance/equity fresh between signals.
 const stopBalanceSync = startBalanceSync(db, metaApiExecutor, log);
+
+// Record realised P&L per trade from broker deal history (trade_events), and
+// reconcile positions the broker closed on its own (TP/SL hit).
+const stopTradeSync = startTradeSync(db, metaApiExecutor, log);
 
 worker.on("completed", (job) => {
   log.info("job completed", { jobId: job.id });
@@ -242,6 +247,7 @@ async function shutdown(): Promise<void> {
   stopCalendar();
   stopCommissionSweep();
   stopBalanceSync();
+  stopTradeSync();
   clearInterval(heartbeatTimer);
   clearInterval(killPollTimer);
   await worker.close();

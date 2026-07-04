@@ -6,6 +6,9 @@ export * from "./parser";
 // stealth is pure (no I/O) and safe for the web bundle:
 export { applyStealth, DEFAULT_STEALTH_CONFIG } from "./executor/stealth";
 export type { StealthConfig, StealthInput, StealthOutput } from "./executor/stealth";
+// deal-sync helpers are pure (no I/O) — used by the executor's trade-sync job:
+export { extractCloseDeals, isFullyClosed, reconcileTradeCloses } from "./executor/deal-sync";
+export type { CloseDeal, TradeCloseReconciliation } from "./executor/deal-sync";
 export * from "./crypto/session";
 export * from "./risk";
 // Performance analytics — pure metric formulas (no I/O), safe for the web bundle.
