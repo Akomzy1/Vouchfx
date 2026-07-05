@@ -1488,6 +1488,26 @@ async function processJob(
       await (db as any).from("broker_connections").update({ status: "error" }).eq("id", brokerConnectionId);
       return;
     }
+    // The account exists but its terminal can't reach the broker server right
+    // now (weekend server downtime, broker outage). waitConnected already
+    // waited 60s — record a transparent skip and surface the disconnect
+    // instead of dying silently (VCH-BRK-05).
+    if (/not connected to broker|timed out waiting.*(connect|synchroniz)|failed to subscribe/i.test(msg)) {
+      console.log(`${tag} skipped: broker not connected — marking connection disconnected`);
+      await writeAuditEvent(db, {
+        userId,
+        eventType: "skipped",
+        parsedSignalId,
+        payload: {
+          reason: "broker_not_connected",
+          broker_connection_id: brokerConnectionId,
+          detail: "The account's terminal is not connected to the broker server (common on weekends). It reconnects automatically when the broker server is back.",
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from("broker_connections").update({ status: "disconnected" }).eq("id", brokerConnectionId);
+      return;
+    }
     throw err;
   }
 }
