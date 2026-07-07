@@ -5,6 +5,8 @@ export interface SymbolSpec {
   contractSize: number;
   /** Smallest price movement (0.00001 for 5-decimal forex, 0.01 for XAUUSD). */
   tickSize: number;
+  /** Quote decimal places (5 for fractional forex, 3 for JPY, 2-3 for gold). */
+  digits?: number;
   /** Monetary gain/loss per tick per 1 lot in the account currency. */
   tickValue: number;
   /** Minimum lot increment (e.g. 0.01). */

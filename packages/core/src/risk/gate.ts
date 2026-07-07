@@ -1,5 +1,5 @@
 import type { RiskSettings, SymbolSpec } from "./types";
-import { resolveSlDistance, type SlUnit } from "./sl-resolve";
+import { resolveSlDistance, pipSizeFor, type SlUnit } from "./sl-resolve";
 import { computeVolume, roundToStep, clampVolume } from "./sizing";
 
 export interface GateInput {
@@ -119,7 +119,7 @@ export function gateAndSize(input: GateInput): GateResult {
     // distance and place the stop on the correct side of entry (below for BUY,
     // above for SELL). Gold uses its own (wider) default.
     const defaultPips = isGoldSymbol(input.symbol) ? settings.defaultSlPipsGold : settings.defaultSlPips;
-    slDistancePrice = defaultPips * 10 * spec.tickSize;
+    slDistancePrice = defaultPips * pipSizeFor(input.symbol, spec);
     effectiveSl = input.side === "SELL"
       ? entryPrice + slDistancePrice
       : entryPrice - slDistancePrice;

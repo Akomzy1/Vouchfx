@@ -177,6 +177,7 @@ export class MetaApiExecutor implements Executor {
       symbol,
       contractSize: (s.contractSize as number) ?? 100_000,
       tickSize: (s.tickSize as number) ?? 0.00001,
+      digits: (s.digits as number | undefined),
       tickValue: (s.tickValue as number) ?? 1.0,
       volumeStep: (s.volumeStep as number) ?? 0.01,
       volumeMin: (s.minVolume as number) ?? 0.01,
@@ -306,15 +307,35 @@ export class MetaApiExecutor implements Executor {
     const connection = await this.rpc(ref.connectionId);
     let sl = changes.sl;
     let tp = changes.tp;
-    // modifyPosition REPLACES both SL and TP — a missing value wipes that side.
-    // Preserve the side we're not changing by reading it from the live position.
-    if (sl === undefined || tp === undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pos: any = await connection.getPosition(ref.brokerId);
-      if (sl === undefined) sl = (pos?.stopLoss as number | undefined);
-      if (tp === undefined) tp = (pos?.takeProfit as number | undefined);
+
+    // The trade is either a filled POSITION or an unfilled PENDING order, and
+    // MetaApi modifies them with different calls: modifyPosition vs modifyOrder.
+    // Probe the position first (common case), then fall back to the pending
+    // order. Both calls REPLACE SL and TP — a missing value wipes that side —
+    // so preserve the side we're not changing by reading it from the live state.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let pos: any = null;
+    try {
+      pos = await connection.getPosition(ref.brokerId);
+    } catch {
+      // Not a filled position — try the pending order below.
     }
-    await connection.modifyPosition(ref.brokerId, sl, tp);
+
+    if (pos) {
+      if (sl === undefined) sl = (pos.stopLoss as number | undefined);
+      if (tp === undefined) tp = (pos.takeProfit as number | undefined);
+      await connection.modifyPosition(ref.brokerId, sl, tp);
+      return;
+    }
+
+    // Pending order: getOrder throws "not found" if the order is gone too,
+    // which propagates to the caller as the position-gone signal.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ord: any = await connection.getOrder(ref.brokerId);
+    if (sl === undefined) sl = (ord?.stopLoss as number | undefined);
+    if (tp === undefined) tp = (ord?.takeProfit as number | undefined);
+    // modifyOrder requires the trigger price; keep the existing one.
+    await connection.modifyOrder(ref.brokerId, ord.openPrice as number, sl, tp);
   }
 
   async cancelPending(ref: TradeRef): Promise<void> {

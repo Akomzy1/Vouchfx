@@ -457,6 +457,13 @@ async function modifyLegSafe(
   } catch (err) {
     const msg = String((err as Error).message ?? err);
     if (/not found|no position|position.*closed/i.test(msg)) {
+      // Double-check before declaring the trade dead: a transient error can
+      // masquerade as "not found", and a false CLOSED orphans a trade that is
+      // still live on the broker (no follow-up will ever match it again).
+      const state = await executor.getState(ref).catch(() => null);
+      if (state === "FILLED" || state === "PENDING") {
+        throw err; // trade is alive — treat as transient and let the job retry
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (db as any).from("trades")
         .update({ status: "CLOSED", closed_at: new Date().toISOString() })
