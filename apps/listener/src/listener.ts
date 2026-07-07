@@ -154,15 +154,20 @@ export async function startListening(
     // and rarely carry trading signals as images.
     let imageBase64: string | undefined;
     if (message.photo) {
-      try {
-        const buf = await client.downloadMedia(message, {});
-        if (Buffer.isBuffer(buf) && buf.length <= MAX_IMAGE_BYTES) {
-          imageBase64 = buf.toString("base64");
-        } else if (Buffer.isBuffer(buf)) {
-          console.warn(`[listener] msg ${msgId}: photo too large (${buf.length} bytes), skipping vision`);
+      // One retry: a dropped image on an image-only signal downgrades the job
+      // to empty text, which parses as not_a_signal — a silent lost trade.
+      for (let attempt = 1; attempt <= 2 && imageBase64 === undefined; attempt++) {
+        try {
+          const buf = await client.downloadMedia(message, {});
+          if (Buffer.isBuffer(buf) && buf.length <= MAX_IMAGE_BYTES) {
+            imageBase64 = buf.toString("base64");
+          } else if (Buffer.isBuffer(buf)) {
+            console.warn(`[listener] msg ${msgId}: photo too large (${buf.length} bytes), skipping vision`);
+            break; // size won't change on retry
+          }
+        } catch (err) {
+          console.warn(`[listener] msg ${msgId}: photo download attempt ${attempt} failed:`, (err as Error).message);
         }
-      } catch (err) {
-        console.warn(`[listener] msg ${msgId}: photo download failed:`, (err as Error).message);
       }
     }
 

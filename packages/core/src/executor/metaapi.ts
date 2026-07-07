@@ -214,25 +214,36 @@ export class MetaApiExecutor implements Executor {
     // Fallback (VCH-BRK-03): the static list didn't match, so scan the broker's
     // FULL symbol list for a suffix/format variant (e.g. XAUUSD.c, XAUUSDmicro,
     // GOLD.). This is how gold/metals with broker-specific suffixes resolve.
+    //
+    // Returning null means "the broker does not offer this instrument" — a
+    // PERMANENT skip. We may only say that after seeing the broker's actual
+    // symbol list; a failed or empty list lookup THROWS so the job retries
+    // instead of mislabelling a transient RPC error as symbol_not_found.
+    let all: string[] | undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const all = (await (connection as any).getSymbols()) as string[] | undefined;
-      if (Array.isArray(all) && all.length > 0) {
-        const match = resolveBrokerSymbol(raw, variants, all);
-        if (match) {
-          try {
-            await connection.getSymbolSpecification(match);
-            return match;
-          } catch {
-            // matched by name but spec fetch failed — fall through to null
-          }
-        }
-      }
-    } catch {
-      // getSymbols unsupported on this account/plan — nothing more we can do
+      all = (await (connection as any).getSymbols()) as string[] | undefined;
+    } catch (err) {
+      throw new Error(
+        `[executor] symbol list unavailable while resolving ${raw}: ${(err as Error).message}`
+      );
+    }
+    if (!Array.isArray(all) || all.length === 0) {
+      throw new Error(`[executor] broker returned an empty symbol list while resolving ${raw}`);
     }
 
-    return null;
+    const match = resolveBrokerSymbol(raw, variants, all);
+    if (!match) return null; // genuinely absent from the broker's symbol list
+
+    try {
+      await connection.getSymbolSpecification(match);
+    } catch (err) {
+      // The name IS in the broker's list, so a failed spec fetch is transient.
+      throw new Error(
+        `[executor] spec fetch failed for ${match} while resolving ${raw}: ${(err as Error).message}`
+      );
+    }
+    return match;
   }
 
   async placeOrder(req: OrderRequest): Promise<OrderResult> {

@@ -1280,7 +1280,7 @@ async function processJob(
     return;
   }
 
-  const { idempotencyKey, messageId, editVersion, text, sourceId, userId, brokerConnectionId, imageBase64 } =
+  const { idempotencyKey, messageId, editVersion, text, sourceId, userId, brokerConnectionId, imageBase64, hasMedia } =
     job.data;
   const tag = `[${idempotencyKey}]`;
 
@@ -1291,6 +1291,18 @@ async function processJob(
     eventType: "received",
     payload: { idempotency_key: idempotencyKey, message_id: messageId, edit_version: editVersion, raw_text: text.slice(0, 500) },
   });
+
+  // ── 1a. Nothing to parse ──────────────────────────────────────────────────
+  // Empty text with no image would parse as not_a_signal, which reads like the
+  // parser's judgement. Say what actually happened: for a media message the
+  // image never made it to the worker (download failed / too large / document),
+  // for a bare message there was simply no content.
+  if (!text.trim() && !imageBase64) {
+    const reason = hasMedia ? "media_message_image_unavailable" : "empty_message";
+    console.log(`${tag} skipped: ${reason}`);
+    await writeAuditEvent(db, { userId, eventType: "skipped", payload: { reason } });
+    return;
+  }
 
   // ── 1b. Plan gate ─────────────────────────────────────────────────────────
   const planGate = await checkPlanGate(db, userId);
