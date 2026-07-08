@@ -173,12 +173,40 @@ export class MetaApiExecutor implements Executor {
     const connection = await this.rpc(conn.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const s: any = await connection.getSymbolSpecification(symbol);
+    const contractSize = (s.contractSize as number) ?? 100_000;
+    const tickSize = (s.tickSize as number) ?? 0.00001;
+
+    // Per-lot tick value drives position sizing, so it MUST be right. The
+    // specification does not carry a usable one: MetaApi omits `tickValue` and
+    // the raw MT5 `TickValue` is frequently 0. The old `?? 1.0` fallback was
+    // only correct by coincidence for USD majors (contractSize*tickSize == 1)
+    // and under-sized everything else — 3-decimal gold by ~10x (real tick value
+    // $0.10, not $1.00), and any non-USD-profit pair by its FX rate.
+    //
+    // Source it from the live quote's account-currency tick value instead
+    // (already FX-converted; lossTickValue = the adverse-move value, the
+    // conservative choice for risk). Fall back to contractSize*tickSize (exact
+    // when the profit currency IS the account currency), then 1.0 last.
+    let tickValue = 0;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const p: any = await connection.getSymbolPrice(symbol);
+      const tv = (p?.lossTickValue as number | undefined) ?? (p?.profitTickValue as number | undefined);
+      if (typeof tv === "number" && tv > 0) tickValue = tv;
+    } catch {
+      // No live quote (market closed / not subscribed) — fall back below.
+    }
+    if (!(tickValue > 0)) {
+      const rawTv = s.tickValue as number | undefined;
+      tickValue = rawTv && rawTv > 0 ? rawTv : contractSize * tickSize;
+    }
+
     return {
       symbol,
-      contractSize: (s.contractSize as number) ?? 100_000,
-      tickSize: (s.tickSize as number) ?? 0.00001,
+      contractSize,
+      tickSize,
       digits: (s.digits as number | undefined),
-      tickValue: (s.tickValue as number) ?? 1.0,
+      tickValue,
       volumeStep: (s.volumeStep as number) ?? 0.01,
       volumeMin: (s.minVolume as number) ?? 0.01,
       volumeMax: (s.maxVolume as number) ?? 500,
