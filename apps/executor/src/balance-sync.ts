@@ -58,6 +58,11 @@ export async function syncBrokerBalances(
       }
       const todayDate = todayStart.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 
+      // getAccountInfo succeeding means the RPC connection is synchronized, i.e.
+      // the account IS connected to the broker right now. Reconcile status to
+      // "connected" so a stale "disconnected"/"deploying"/"error" self-heals
+      // server-side within one sync cycle — the UI poll only corrects the badge
+      // while someone has the settings page open; this fixes the source of truth.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (db as any)
         .from("broker_connections")
@@ -65,6 +70,8 @@ export async function syncBrokerBalances(
           last_balance_usd: balance,
           last_equity_usd: equity,
           last_synced_at: new Date().toISOString(),
+          status: "connected",
+          last_status_at: new Date().toISOString(),
           ...(accountMode ? { account_mode: accountMode } : {}),
           ...(todayPnl != null ? { today_realized_pnl_usd: todayPnl, today_pnl_date: todayDate } : {}),
         })

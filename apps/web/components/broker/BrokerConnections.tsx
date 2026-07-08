@@ -78,22 +78,31 @@ function ConnectionCard({
     }
   }
 
-  // Poll for status while deploying
+  // Poll for status. A broker connection is LIVE state — it can move between
+  // connected/disconnected/error at any time (broker handshake finishing after
+  // deploy, weekend/maintenance drops, re-auth). So keep polling while the card
+  // is mounted, not just during "deploying" — otherwise a disconnected→connected
+  // transition after the initial deploy is never picked up and the pill sticks
+  // on a stale value. Fast cadence while deploying, relaxed once settled.
   useEffect(() => {
-    if (status !== "deploying") return;
-    const interval = setInterval(async () => {
+    const delay = status === "deploying" ? 5000 : 20000;
+    let cancelled = false;
+    const poll = async () => {
       try {
         const res = await fetch(`/api/broker/${conn.id}/status`);
         const json = await res.json();
-        if (json.status && json.status !== status) {
+        if (!cancelled && json.status && json.status !== status) {
           setStatus(json.status as typeof status);
         }
-        if (json.status !== "deploying") clearInterval(interval);
       } catch {
         // non-fatal, keep polling
       }
-    }, 5000);
-    return () => clearInterval(interval);
+    };
+    // Poll once promptly so a stale "disconnected" on page load self-corrects
+    // within seconds rather than waiting a full interval.
+    poll();
+    const interval = setInterval(poll, delay);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [conn.id, status]);
 
   async function handleRemove() {
