@@ -50,6 +50,13 @@ interface PoolEntry {
   activity: { at: number };
   /** When this client was (re)built — used for the proactive age-based reconnect. */
   connectedAt: number;
+  /**
+   * Consecutive failure-triggered rebuilds that have NOT restored delivery.
+   * Reset once the client actually delivers an update after connecting. When it
+   * climbs past the escalation threshold, the in-process rebuild has proven
+   * useless and the watchdog restarts the whole process instead.
+   */
+  failureRebuilds: number;
 }
 
 interface SessionRow {
@@ -149,6 +156,13 @@ export class UserPool {
   async watchdog(): Promise<void> {
     const STALE_ACTIVITY_MS = 12 * 60_000;
     const MAX_CONN_AGE_MS = 25 * 60_000; // proactive reconnect backstop
+    // After this many failure-triggered rebuilds that never restore delivery,
+    // stop rebuilding in-process and exit so the orchestrator restarts the
+    // machine. Observed 2026-07-08: a wedged GramJS update loop (TIMEOUT-
+    // spinning) survived repeated in-process rebuilds for ~6h while the health
+    // check stayed green; a full process restart cleared it immediately. ~3
+    // failed rebuilds ≈ 30-40 min, well short of a silent multi-hour outage.
+    const MAX_FAILURE_REBUILDS = 3;
     for (const entry of [...this.entries.values()]) {
       const stale = Date.now() - entry.activity.at;
       const age = Date.now() - entry.connectedAt;
@@ -161,6 +175,12 @@ export class UserPool {
         console.warn(`[pool] user ${entry.userId} liveness probe failed (${entry.probeFailures} consecutive)`);
       }
 
+      // The client delivered a real update AFTER connecting (activity advanced
+      // past the connect timestamp) → it genuinely works, so a prior rebuild
+      // succeeded. Clear the failed-rebuild tally. This is what keeps a normal
+      // transient blip (rebuild recovers) from ever escalating to a restart.
+      if (entry.activity.at - entry.connectedAt > 5_000) entry.failureRebuilds = 0;
+
       const probeDead = entry.probeFailures >= 2;
       const activityDead = stale > STALE_ACTIVITY_MS;
       // Backstop: rebuild any connection older than MAX_CONN_AGE regardless of
@@ -170,13 +190,30 @@ export class UserPool {
       const aged = age > MAX_CONN_AGE_MS;
       if (!probeDead && !activityDead && !aged) continue;
 
+      const failureTriggered = probeDead || activityDead;
+
+      // In-process rebuilds have stopped helping — escalate to a clean process
+      // exit. Gated on failureTriggered so a purely proactive age-based
+      // reconnect can never trip it.
+      if (failureTriggered && entry.failureRebuilds >= MAX_FAILURE_REBUILDS) {
+        console.error(
+          `[pool] user ${entry.userId} still dead after ${entry.failureRebuilds} rebuild(s) — exiting for a clean machine restart`
+        );
+        process.exit(1);
+      }
+
       console.warn(
-        `[pool] user ${entry.userId} rebuilding (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m, age=${Math.round(age / 60_000)}m)`
+        `[pool] user ${entry.userId} rebuilding (probeDead=${probeDead}, idle=${Math.round(stale / 60_000)}m, age=${Math.round(age / 60_000)}m, failedRebuilds=${entry.failureRebuilds})`
       );
       const { session, sourceMap, brokerConnectionIds } = entry;
+      // Carry the tally onto the fresh entry; only failure-triggered rebuilds
+      // count toward escalation.
+      const carriedFailures = failureTriggered ? entry.failureRebuilds + 1 : entry.failureRebuilds;
       await this.removeEntry(entry.userId);
       try {
         await this.addEntry(session, sourceMap, brokerConnectionIds);
+        const rebuilt = this.entries.get(entry.userId);
+        if (rebuilt) rebuilt.failureRebuilds = carriedFailures;
         console.log(`[pool] user ${entry.userId} client rebuilt after dead connection`);
       } catch (err) {
         // Next watchdog/sync tick retries; sessions stay in DB.
@@ -380,6 +417,7 @@ export class UserPool {
       probeFailures: 0,
       activity,
       connectedAt: Date.now(),
+      failureRebuilds: 0,
     });
 
     await updateSessionStatus(userId, "active").catch(() => {});
