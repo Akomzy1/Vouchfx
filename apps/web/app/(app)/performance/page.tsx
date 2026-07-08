@@ -15,11 +15,20 @@ export default async function PerformancePage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
-  const { data } = await db
-    .from("broker_connections")
-    .select("id, label, account_mode, is_primary")
-    .order("is_primary", { ascending: false })
-    .order("created_at", { ascending: true });
+  const [{ data }, { data: closedRows }] = await Promise.all([
+    db
+      .from("broker_connections")
+      .select("id, label, account_mode, is_primary")
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true }),
+    // Which accounts actually have realised results, so the view can open on one
+    // that has data instead of a primary/first account that shows an empty page.
+    db.from("trades").select("broker_connection_id").eq("status", "CLOSED"),
+  ]);
+
+  const withData = new Set(
+    ((closedRows ?? []) as Array<{ broker_connection_id: string }>).map((r) => r.broker_connection_id)
+  );
 
   const accounts: AccountOpt[] = ((data ?? []) as Array<{ id: string; label: string | null; account_mode: string | null; is_primary: boolean | null }>).map(
     (a) => ({
@@ -27,6 +36,7 @@ export default async function PerformancePage() {
       label: a.label,
       accountMode: a.account_mode === "demo" || a.account_mode === "live" ? a.account_mode : null,
       isPrimary: a.is_primary === true,
+      hasData: withData.has(a.id),
     })
   );
 

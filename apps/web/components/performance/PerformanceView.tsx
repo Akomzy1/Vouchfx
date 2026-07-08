@@ -13,6 +13,8 @@ export interface AccountOpt {
   accountMode: "demo" | "live" | null;
   /** The account the rest of the app centers on — Performance opens here. */
   isPrimary?: boolean;
+  /** Whether this account has any closed trades (realised results to show). */
+  hasData?: boolean;
 }
 
 type Range = "month" | "30d" | "90d" | "all";
@@ -78,13 +80,18 @@ export default function PerformanceView({ accounts }: { accounts: AccountOpt[] }
   }, []);
   const options = useMemo(() => buildOptions(accounts), [accounts]);
 
-  // Open on the PRIMARY account's own scope, not the first option. With 2+ live
-  // accounts the first option is "All live accounts", which shows an empty page
-  // when the user's trading is on another account (e.g. a demo) — reads as
-  // broken. The primary is the account the dashboard already centers on.
+  // Open on an account that actually has results, not the first option. With 2+
+  // live accounts the first option is "All live accounts", and the primary can
+  // be a live account with no closed trades yet — both show an empty page that
+  // reads as broken while the user's real history sits under another account.
+  // Prefer: primary-with-data → any account-with-data → primary → first option.
   const defaultId = useMemo(() => {
+    const has = (id: string) => options.some((o) => o.id === id);
     const primary = accounts.find((a) => a.isPrimary);
-    return primary && options.some((o) => o.id === primary.id) ? primary.id : options[0]!.id;
+    if (primary?.hasData && has(primary.id)) return primary.id;
+    const anyData = accounts.find((a) => a.hasData && has(a.id));
+    if (anyData) return anyData.id;
+    return primary && has(primary.id) ? primary.id : options[0]!.id;
   }, [accounts, options]);
   const [selectedId, setSelectedId] = useState(defaultId);
   const [range, setRange] = useState<Range>("30d");
