@@ -17,15 +17,16 @@ export default async function PerformancePage() {
   const db = supabase as any;
   const { data } = await db
     .from("broker_connections")
-    .select("id, label, account_mode")
+    .select("id, label, account_mode, is_primary")
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: true });
 
-  const accounts: AccountOpt[] = ((data ?? []) as Array<{ id: string; label: string | null; account_mode: string | null }>).map(
+  const accounts: AccountOpt[] = ((data ?? []) as Array<{ id: string; label: string | null; account_mode: string | null; is_primary: boolean | null }>).map(
     (a) => ({
       id: a.id,
       label: a.label,
       accountMode: a.account_mode === "demo" || a.account_mode === "live" ? a.account_mode : null,
+      isPrimary: a.is_primary === true,
     })
   );
 

@@ -11,6 +11,8 @@ export interface AccountOpt {
   id: string;
   label: string | null;
   accountMode: "demo" | "live" | null;
+  /** The account the rest of the app centers on — Performance opens here. */
+  isPrimary?: boolean;
 }
 
 type Range = "month" | "30d" | "90d" | "all";
@@ -76,7 +78,15 @@ export default function PerformanceView({ accounts }: { accounts: AccountOpt[] }
   }, []);
   const options = useMemo(() => buildOptions(accounts), [accounts]);
 
-  const [selectedId, setSelectedId] = useState(options[0]!.id);
+  // Open on the PRIMARY account's own scope, not the first option. With 2+ live
+  // accounts the first option is "All live accounts", which shows an empty page
+  // when the user's trading is on another account (e.g. a demo) — reads as
+  // broken. The primary is the account the dashboard already centers on.
+  const defaultId = useMemo(() => {
+    const primary = accounts.find((a) => a.isPrimary);
+    return primary && options.some((o) => o.id === primary.id) ? primary.id : options[0]!.id;
+  }, [accounts, options]);
+  const [selectedId, setSelectedId] = useState(defaultId);
   const [range, setRange] = useState<Range>("30d");
   const [calMonth, setCalMonth] = useState(() => {
     const n = new Date();
