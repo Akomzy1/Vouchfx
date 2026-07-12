@@ -1076,6 +1076,8 @@ async function executeNewSignal(
 
   console.log(`${tag} placing ${tpLegs.length} leg(s) on ${resolvedSymbol} type=${orderType}${entryPrice != null ? ` entry=${entryPrice}` : ""}`);
 
+  let placedLegs = 0;
+
   for (let i = 0; i < tpLegs.length; i++) {
     const tp = tpLegs[i];
     const legKey = tpLegs.length === 1 ? idempotencyKey : `${idempotencyKey}:leg${i}`;
@@ -1138,6 +1140,7 @@ async function executeNewSignal(
       }).eq("id", tradeId);
 
       console.log(`${tag} leg ${i} filled: broker_id=${brokerId} price=${fillPrice}`);
+      placedLegs++;
     } catch (err) {
       // MetaApi ValidationError carries the offending fields in .details
       const details = (err as { details?: unknown }).details;
@@ -1149,6 +1152,14 @@ async function executeNewSignal(
     }
   }
 
+  // Every leg was rejected by the broker → the per-leg "error" audit events
+  // tell the real story. Writing "executed" (and a trade_opened push) here
+  // showed the user a successful trade that never reached MT5.
+  if (placedLegs === 0) {
+    console.log(`${tag} all ${tpLegs.length} leg(s) failed to place — no executed event`);
+    return;
+  }
+
   await writeAuditEvent(db, {
     userId,
     eventType: "executed",
@@ -1156,7 +1167,8 @@ async function executeNewSignal(
     payload: {
       symbol: parsed.symbol,
       side: effSide,
-      legs: tpLegs.length,
+      legs: placedLegs,
+      ...(placedLegs < tpLegs.length ? { legs_failed: tpLegs.length - placedLegs } : {}),
       tps: effTps,
       sl: effSl,
       resolved_symbol: resolvedSymbol,
@@ -1171,7 +1183,7 @@ async function executeNewSignal(
   notifyAsync(
     db, userId, "trade_opened",
     `${effSide} ${parsed.symbol} opened${overrides.reverse ? " (reversed)" : ""}`,
-    `${tpLegs.length} leg${tpLegs.length > 1 ? "s" : ""} · vol ${legVolume} · risk $${gateResult.dollarRisk.toFixed(2)}`
+    `${placedLegs} leg${placedLegs > 1 ? "s" : ""} · vol ${legVolume} · risk $${gateResult.dollarRisk.toFixed(2)}`
   );
 }
 

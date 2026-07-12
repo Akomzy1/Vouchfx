@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { roundToStep, clampVolume, computeVolume } from "../sizing";
 import { resolveSlDistance } from "../sl-resolve";
-import { gateAndSize } from "../gate";
+import { gateAndSize, isCryptoSymbol, CRYPTO_DEFAULT_SL_PERCENT } from "../gate";
 import type { SymbolSpec, RiskSettings } from "../types";
 import { DEFAULT_RISK_SETTINGS } from "../types";
 
@@ -25,6 +25,17 @@ const XAUUSD: SymbolSpec = {
   volumeStep: 0.01,
   volumeMin: 0.01,
   volumeMax: 50,
+};
+
+const BTCUSD: SymbolSpec = {
+  symbol: "BTCUSD",
+  contractSize: 1,
+  tickSize: 0.01,
+  tickValue: 0.01,   // USD per 1-cent tick per 1 lot (1 BTC)
+  volumeStep: 0.01,
+  volumeMin: 0.01,
+  volumeMax: 200,
+  digits: 2,
 };
 
 const SETTINGS: RiskSettings = {
@@ -289,5 +300,99 @@ describe("gateAndSize", () => {
       spec: EURUSD,
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+// ── gateAndSize — crypto default SL ───────────────────────────────────────────
+// Regression: a no-SL BTCUSD signal with apply_default used the 20-PIP forex
+// default → $0.20 SL distance on BTC. The broker rejected the stop ("Invalid
+// stops in the request") and the near-zero distance sized the volume up to the
+// broker's 200-lot max. Crypto defaults must be percent-of-price.
+
+describe("gateAndSize — crypto default SL", () => {
+  it("detects crypto symbols, including broker-suffixed ones", () => {
+    expect(isCryptoSymbol("BTCUSD")).toBe(true);
+    expect(isCryptoSymbol("BTCUSDm")).toBe(true);
+    expect(isCryptoSymbol("XBTUSD")).toBe(true);
+    expect(isCryptoSymbol("ETHUSD")).toBe(true);
+    expect(isCryptoSymbol("EURUSD")).toBe(false);
+    expect(isCryptoSymbol("XAUUSD")).toBe(false);
+    expect(isCryptoSymbol("US100")).toBe(false);
+  });
+
+  it("applies a percent-of-price default SL on BTCUSD (not pips)", () => {
+    const entry = 118_000;
+    const result = gateAndSize({
+      sl: null,
+      slUnit: "pips",
+      side: "BUY",
+      symbol: "BTCUSD",
+      entryPrice: entry,
+      accountBalance: 10_000,
+      settings: { ...SETTINGS, defaultSlPolicy: "apply_default", defaultSlPips: 20 },
+      spec: BTCUSD,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const expectedDist = entry * (CRYPTO_DEFAULT_SL_PERCENT / 100); // 1,180
+      expect(result.slPrice).toBeCloseTo(entry - expectedDist, 2);
+      // The 20-pip bug put the SL $0.20 below entry — assert we are far from it.
+      expect(entry - result.slPrice!).toBeGreaterThan(100);
+    }
+  });
+
+  it("sizes a sane volume from the percent default (not the broker max-lot cap)", () => {
+    const entry = 118_000;
+    const result = gateAndSize({
+      sl: null,
+      slUnit: "pips",
+      side: "BUY",
+      symbol: "BTCUSD",
+      entryPrice: entry,
+      accountBalance: 10_000,
+      settings: { ...SETTINGS, defaultSlPolicy: "apply_default" },
+      spec: BTCUSD,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // riskAmount = $100; valuePerLot = (1180 / 0.01) * 0.01 = $1,180/lot
+      // → 0.08 lots after step rounding. The pip bug produced 200 lots.
+      expect(result.volume).toBeCloseTo(0.08, 2);
+      expect(result.volume).toBeLessThan(1);
+      expect(result.dollarRisk).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("places the crypto default SL above entry for SELL", () => {
+    const entry = 118_000;
+    const result = gateAndSize({
+      sl: null,
+      slUnit: "pips",
+      side: "SELL",
+      symbol: "BTCUSD",
+      entryPrice: entry,
+      accountBalance: 10_000,
+      settings: { ...SETTINGS, defaultSlPolicy: "apply_default" },
+      spec: BTCUSD,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.slPrice!).toBeGreaterThan(entry);
+    }
+  });
+
+  it("leaves an explicit crypto SL untouched (no default substitution)", () => {
+    const result = gateAndSize({
+      sl: 116_000,
+      slUnit: "price",
+      side: "BUY",
+      symbol: "BTCUSD",
+      entryPrice: 118_000,
+      accountBalance: 10_000,
+      settings: { ...SETTINGS, defaultSlPolicy: "apply_default" },
+      spec: BTCUSD,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.slPrice).toBe(116_000);
   });
 });

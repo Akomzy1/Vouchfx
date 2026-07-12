@@ -44,7 +44,7 @@ INSERT INTO public.prop_rulesets (
   weekend_holding_allowed, min_trading_days, copy_trading_permitted,
   source_url, verified_at, published_by, published_at, agent_confidence, notes
 ) VALUES (
-  'r1000000-0000-0000-0000-000000000001',
+  'e1000000-0000-0000-0000-000000000001',
   'f1000000-0000-0000-0000-000000000001',
   'Standard Challenge', 1, 'published', true,
   5.0, 'balance',
@@ -74,7 +74,7 @@ INSERT INTO public.prop_rulesets (
   weekend_holding_allowed, min_trading_days, copy_trading_permitted,
   source_url, verified_at, published_by, published_at, agent_confidence, notes
 ) VALUES (
-  'r1000000-0000-0000-0000-000000000002',
+  'e1000000-0000-0000-0000-000000000002',
   'f1000000-0000-0000-0000-000000000001',
   'Express Challenge', 1, 'published', true,
   4.0, 'balance',
@@ -108,7 +108,7 @@ INSERT INTO public.prop_rulesets (
   weekend_holding_allowed, min_trading_days, copy_trading_permitted,
   source_url, verified_at, published_by, published_at, agent_confidence, notes
 ) VALUES (
-  'r1000000-0000-0000-0000-000000000003',
+  'e1000000-0000-0000-0000-000000000003',
   'f1000000-0000-0000-0000-000000000002',
   'Hyper Growth', 1, 'published', true,
   4.0, 'balance',
@@ -141,7 +141,7 @@ INSERT INTO public.prop_rulesets (
   weekend_holding_allowed, min_trading_days, copy_trading_permitted,
   source_url, verified_at, published_by, published_at, agent_confidence, notes
 ) VALUES (
-  'r1000000-0000-0000-0000-000000000004',
+  'e1000000-0000-0000-0000-000000000004',
   'f1000000-0000-0000-0000-000000000003',
   'Standard', 1, 'published', true,
   5.0, 'equity',
@@ -174,7 +174,7 @@ INSERT INTO public.prop_rulesets (
   weekend_holding_allowed, min_trading_days, copy_trading_permitted,
   source_url, verified_at, published_by, published_at, agent_confidence, notes
 ) VALUES (
-  'r1000000-0000-0000-0000-000000000005',
+  'e1000000-0000-0000-0000-000000000005',
   'f1000000-0000-0000-0000-000000000004',
   'Evaluation', 1, 'published', true,
   5.0, 'balance',

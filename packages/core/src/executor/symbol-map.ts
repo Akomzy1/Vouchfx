@@ -15,7 +15,7 @@ export const SYMBOL_VARIANTS: Readonly<Record<string, readonly string[]>> = {
 
   // ── Energy ───────────────────────────────────────────────────────────────────
   USOIL:  ["USOIL", "OIL", "WTI", "XTIUSD", "CL", "USCrude"],
-  UKOIL:  ["UKOIL", "BRENT", "XBTUSD", "UKCrude"],
+  UKOIL:  ["UKOIL", "BRENT", "XBRUSD", "UKCrude"],
   NGAS:   ["NGAS", "NATGAS", "XNGUSD"],
 
   // ── Indices ──────────────────────────────────────────────────────────────────

@@ -24,6 +24,24 @@ export function isGoldSymbol(symbol: string): boolean {
   return s.includes("XAU") || s.includes("XAG") || s.includes("GOLD");
 }
 
+/**
+ * Crypto CFDs: "pips" is not a meaningful unit for these symbols. Broker quote
+ * digits put a BTC "pip" at $0.01–$0.10, so a 20-pip default SL is a ~$0.20
+ * stop on a six-figure asset — below every broker's minimum stop distance
+ * (order rejected: "Invalid stops"), and the near-zero SL distance blows the
+ * risk-based volume up to the broker's max-lot cap. Default stops for crypto
+ * are therefore sized as a PERCENT of entry price, like signal percent-SLs.
+ */
+export function isCryptoSymbol(symbol: string): boolean {
+  const s = symbol.toUpperCase();
+  return ["BTC", "XBT", "ETH", "SOL", "XRP", "BNB", "LTC", "DOGE", "ADA"].some((t) =>
+    s.includes(t)
+  );
+}
+
+/** Default-SL distance for crypto as a percent of entry (≈$1,200 on BTC at $120k). */
+export const CRYPTO_DEFAULT_SL_PERCENT = 1.0;
+
 export type GateResult =
   | { ok: true; volume: number; slPrice: number | null; dollarRisk: number }
   | { ok: false; reason: string };
@@ -115,11 +133,16 @@ export function gateAndSize(input: GateInput): GateResult {
     if (settings.defaultSlPolicy === "ask") {
       return { ok: false, reason: "no_sl:policy=ask" };
     }
-    // apply_default: convert the asset-appropriate default pips to a price
+    // apply_default: convert the asset-appropriate default distance to a price
     // distance and place the stop on the correct side of entry (below for BUY,
-    // above for SELL). Gold uses its own (wider) default.
-    const defaultPips = isGoldSymbol(input.symbol) ? settings.defaultSlPipsGold : settings.defaultSlPips;
-    slDistancePrice = defaultPips * pipSizeFor(input.symbol, spec);
+    // above for SELL). Gold uses its own (wider) pip default; crypto uses a
+    // percent-of-price default because pips don't scale to those assets.
+    if (isCryptoSymbol(input.symbol)) {
+      slDistancePrice = entryPrice * (CRYPTO_DEFAULT_SL_PERCENT / 100);
+    } else {
+      const defaultPips = isGoldSymbol(input.symbol) ? settings.defaultSlPipsGold : settings.defaultSlPips;
+      slDistancePrice = defaultPips * pipSizeFor(input.symbol, spec);
+    }
     effectiveSl = input.side === "SELL"
       ? entryPrice + slDistancePrice
       : entryPrice - slDistancePrice;

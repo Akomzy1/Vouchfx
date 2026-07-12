@@ -26,4 +26,8 @@ COPY packages ./packages
 COPY apps/executor ./apps/executor
 
 WORKDIR /app/apps/executor
-CMD ["pnpm", "exec", "tsx", "src/index.ts"]
+# Invoke tsx directly — `pnpm exec` (v10+) runs a deps-status check at startup
+# that spawns a full workspace `pnpm install` inside the 512MB VM (OOM-killed →
+# boot loop). Everything is already installed at build time; the boot path
+# must not touch pnpm or the npm registry.
+CMD ["./node_modules/.bin/tsx", "src/index.ts"]
