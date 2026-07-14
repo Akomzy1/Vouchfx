@@ -26,6 +26,7 @@ type PatchBody = {
   default_sl_pips?:       unknown;
   default_sl_pips_gold?:  unknown;
   breakeven_after_tp1?:   unknown;
+  breakeven_at_1r?:       unknown;
   trailing_after_tp2?:    unknown;
   execution_mode?:        string;
   mirror_lot_mode?:       string;
@@ -63,7 +64,7 @@ function validatePatch(body: PatchBody): { ok: true; data: Record<string, unknow
       d[key] = v;
     }
   }
-  for (const key of ["breakeven_after_tp1", "trailing_after_tp2", "mirror_allow_no_sl", "news_filter_enabled"] as const) {
+  for (const key of ["breakeven_after_tp1", "breakeven_at_1r", "trailing_after_tp2", "mirror_allow_no_sl", "news_filter_enabled"] as const) {
     if (key in body) {
       if (typeof body[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
       d[key] = body[key];
@@ -92,6 +93,7 @@ const DEFAULTS = {
   default_sl_pips:       null,
   default_sl_pips_gold:  150,
   breakeven_after_tp1:   false,
+  breakeven_at_1r:       false,
   trailing_after_tp2:    false,
   execution_mode:        "apply_my_rules" as const,
   mirror_lot_mode:       "risk_based" as const,

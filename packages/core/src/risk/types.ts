@@ -50,6 +50,8 @@ export interface RiskSettings {
   dailyLossCapAction: DailyLossAction;
   /** Move SL to entry_price when the first TP leg closes. */
   breakevenAfterTp1: boolean;
+  /** Move SL to entry_price once price is in profit by the SL distance (1R). */
+  breakevenAt1R: boolean;
   /** Enable trailing stop management after TP2 leg closes (future). */
   trailingAfterTp2: boolean;
   /** Whether to mirror the provider's SL/TP exactly or apply user's own risk rules. */
@@ -78,6 +80,7 @@ export const DEFAULT_RISK_SETTINGS: Readonly<RiskSettings> = {
   dailyLossCapPercent: 0,
   dailyLossCapAction: "pause",
   breakevenAfterTp1: false,
+  breakevenAt1R: false,
   trailingAfterTp2: false,
   executionMode: "apply_my_rules",
   mirrorLotMode: "risk_based",

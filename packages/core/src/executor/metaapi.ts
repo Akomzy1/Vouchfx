@@ -42,6 +42,17 @@ import type {
 import { createHash } from "node:crypto";
 import { SYMBOL_VARIANTS, resolveBrokerSymbol } from "./symbol-map";
 
+/** Minimal open-position snapshot returned by getOpenPositions(). */
+export interface OpenPosition {
+  /** MetaApi position id — matches trades.broker_order_id. */
+  brokerId: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  openPrice: number;
+  currentPrice: number;
+  stopLoss: number | null;
+}
+
 /**
  * MetaApi clientId must match the pattern TE_<symbol>_<id> — verified
  * empirically against the live API (2026-06-12): "TE_GBPUSD_x…" passes,
@@ -224,6 +235,29 @@ export class MetaApiExecutor implements Executor {
       throw new Error(`[executor] no live quote for ${symbol}`);
     }
     return { bid, ask };
+  }
+
+  /**
+   * All open positions on the account, with the terminal's live price per
+   * position (currentPrice is the closable side: bid for BUY, ask for SELL).
+   * Used by the breakeven watch — one RPC per account instead of one quote
+   * fetch per trade.
+   */
+  async getOpenPositions(conn: BrokerConnection): Promise<OpenPosition[]> {
+    this.register(conn);
+    const connection = await this.rpc(conn.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw: any[] = (await connection.getPositions()) ?? [];
+    return raw
+      .filter((p) => p && p.id != null)
+      .map((p) => ({
+        brokerId: String(p.id),
+        symbol: String(p.symbol ?? ""),
+        side: p.type === "POSITION_TYPE_SELL" ? ("SELL" as const) : ("BUY" as const),
+        openPrice: Number(p.openPrice ?? 0),
+        currentPrice: Number(p.currentPrice ?? 0),
+        stopLoss: p.stopLoss != null ? Number(p.stopLoss) : null,
+      }));
   }
 
   async resolveSymbol(raw: string, conn: BrokerConnection): Promise<string | null> {

@@ -28,6 +28,7 @@ import { startCalendarSchedule } from "./calendar";
 import { startCommissionSweep } from "./commission";
 import { startBalanceSync } from "./balance-sync";
 import { startTradeSync } from "./trade-sync";
+import { startBreakevenWatch } from "./breakeven-watch";
 
 const env = parseEnv();
 const log = createLogger("executor");
@@ -120,6 +121,9 @@ const stopBalanceSync = startBalanceSync(db, metaApiExecutor, log);
 // Record realised P&L per trade from broker deal history (trade_events), and
 // reconcile positions the broker closed on its own (TP/SL hit).
 const stopTradeSync = startTradeSync(db, metaApiExecutor, log);
+
+// Move stops to entry once a trade is 1R in profit (risk_settings.breakeven_at_1r).
+const stopBreakevenWatch = startBreakevenWatch(db, metaApiExecutor, log);
 
 worker.on("completed", (job) => {
   log.info("job completed", { jobId: job.id });
@@ -248,6 +252,7 @@ async function shutdown(): Promise<void> {
   stopCommissionSweep();
   stopBalanceSync();
   stopTradeSync();
+  stopBreakevenWatch();
   clearInterval(heartbeatTimer);
   clearInterval(killPollTimer);
   await worker.close();

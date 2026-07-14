@@ -180,6 +180,7 @@ export interface RiskSettingsRow {
   default_sl_pips: number | null;
   default_sl_pips_gold: number | null;
   breakeven_after_tp1: boolean;
+  breakeven_at_1r: boolean;
   trailing_after_tp2: boolean;
   created_at: string;
   updated_at: string;

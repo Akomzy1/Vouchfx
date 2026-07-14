@@ -82,6 +82,7 @@ function dbRowToRiskSettings(
     dailyLossCapPercent: Number(row.daily_loss_cap_pct ?? 0),
     dailyLossCapAction: (row.daily_loss_cap_action as RiskSettings["dailyLossCapAction"]) ?? "pause",
     breakevenAfterTp1: Boolean(row.breakeven_after_tp1 ?? false),
+    breakevenAt1R: Boolean(row.breakeven_at_1r ?? false),
     trailingAfterTp2: Boolean(row.trailing_after_tp2 ?? false),
     executionMode: row.execution_mode === "mirror_provider" ? "mirror_provider" : "apply_my_rules",
     mirrorLotMode: mirrorLotMap[row.mirror_lot_mode as string] ?? "risk_based",

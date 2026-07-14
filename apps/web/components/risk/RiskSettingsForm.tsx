@@ -32,6 +32,7 @@ export interface RiskSettings {
   default_sl_pips:       number | null;
   default_sl_pips_gold:  number | null;
   breakeven_after_tp1:   boolean;
+  breakeven_at_1r:       boolean;
   trailing_after_tp2:    boolean;
   news_filter_enabled:   boolean;
   news_filter_window_min: number;
@@ -655,6 +656,9 @@ export default function RiskSettingsForm({
       >
         <Field label="Breakeven after TP1" helper="Move the stop loss to entry once the first take-profit is hit — turns a winner into a risk-free runner.">
           <Toggle on={s.breakeven_after_tp1} onChange={(v) => set({ breakeven_after_tp1: v })} label="Breakeven after TP1" />
+        </Field>
+        <Field label="Breakeven at 1R" helper="Move the stop loss to entry once price is in profit by the stop-loss distance (1:1). Works on any trade with a stop — no take-profit needed.">
+          <Toggle on={s.breakeven_at_1r} onChange={(v) => set({ breakeven_at_1r: v })} label="Breakeven at 1R" />
         </Field>
         <Field label="Trailing stop after TP2" helper="Trail the stop behind price once TP2 is reached, locking in gains as the move extends. (Execution in next phase.)">
           <Toggle on={s.trailing_after_tp2} onChange={(v) => set({ trailing_after_tp2: v })} label="Trailing stop after TP2" />
